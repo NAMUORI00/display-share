@@ -1,0 +1,98 @@
+{
+    "educational_framework": {
+        "name": "Educational Computer Vision Framework",
+        "version": "1.0.0",
+        "purpose": "Learning computer vision and tracking algorithms",
+        "mode": "educational_only"
+    },
+    "vision_algorithms": {
+        "selected_algorithm": "hsv",
+        "hsv_tracking": {
+            "enabled": true,
+            "lower_bound": [140, 120, 180],
+            "upper_bound": [160, 200, 255],
+            "morphology_kernel_size": 3,
+            "min_contour_area": 100
+        },
+        "yolo_detection": {
+            "enabled": false,
+            "model_path": "models/yolo.weights",
+            "config_path": "models/yolo.cfg",
+            "confidence_threshold": 0.5,
+            "nms_threshold": 0.4
+        },
+        "template_matching": {
+            "enabled": true,
+            "method": "TM_CCOEFF_NORMED",
+            "threshold": 0.8,
+            "multi_scale": true
+        },
+        "optical_flow": {
+            "enabled": true,
+            "max_corners": 100,
+            "quality_level": 0.01,
+            "min_distance": 10.0,
+            "block_size": 3,
+            "use_harris_detector": false
+        },
+        "kalman_filter": {
+            "enabled": true,
+            "process_noise_cov": 0.01,
+            "measurement_noise_cov": 0.1,
+            "error_cov_post": 0.1
+        }
+    },
+    "simulation": {
+        "enabled": true,
+        "reaction_time_ms": 150.0,
+        "movement_smoothness": 0.7,
+        "enable_prediction": true,
+        "enable_noise_simulation": false,
+        "auto_tracking_demo": false,
+        "trigger_simulation": false,
+        "max_history_size": 100
+    },
+    "analytics": {
+        "enabled": true,
+        "max_history_size": 1000,
+        "fps_calculation_window_sec": 5.0,
+        "enable_real_time_analysis": true,
+        "enable_detailed_logging": false,
+        "confidence_threshold": 0.5,
+        "auto_export": false,
+        "export_interval_minutes": 30
+    },
+    "gui": {
+        "educational_mode": true,
+        "show_algorithm_comparison": false,
+        "show_step_by_step_demo": false,
+        "show_performance_metrics": true,
+        "show_real_time_analysis": true,
+        "enable_algorithm_tutorials": false,
+        "show_code_explanations": false,
+        "ui_scale": 1.0,
+        "show_metrics_overlay": true
+    },
+    "performance": {
+        "target_fps": 30,
+        "enable_multithreading": true,
+        "max_processing_threads": 4,
+        "frame_buffer_size": 5,
+        "enable_gpu_acceleration": false
+    },
+    "data_export": {
+        "default_format": "csv",
+        "auto_timestamp": true,
+        "include_frame_data": false,
+        "include_intermediate_steps": false,
+        "compression": false
+    },
+    "educational_content": {
+        "enable_tutorials": true,
+        "show_algorithm_explanations": true,
+        "interactive_demos": true,
+        "step_by_step_guides": true,
+        "performance_comparisons": true,
+        "code_examples": false
+    }
+}
