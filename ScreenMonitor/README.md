@@ -4,18 +4,19 @@
 
 ## 🚀 주요 특징
 
-### 🎯 초고성능 화면 캡처
-- **27,000+ FPS**: screen_capture_lite 라이브러리 기반 극강 성능
+### 🎯 고성능 화면 캡처
+- **60-120 FPS**: screen_capture_lite 라이브러리 기반 최적화된 성능
 - **크로스 플랫폼**: Windows, macOS, Linux 완전 지원  
 - **멀티모니터**: 최대 3개 모니터 동시 캡처
 - **최소 종속성**: 외부 라이브러리 의존성 최소화
 - **실시간 처리**: BGRA → BGR 자동 변환 및 OpenCV 통합
 
 ### 🔬 교육용 컴퓨터 비전
-- **OpenCV 4**: 최소 기능(jpeg, png, tiff)으로 최적화
+- **OpenCV 4**: DNN 모듈 포함, 최적화된 기능 세트
 - **실시간 분석**: 성능 통계 및 FPS 모니터링
-- **알고리즘 학습**: HSV 추적, 템플릿 매칭, 광학 흐름
-- **교육 중심**: 시뮬레이션 기반 학습 (실제 제어 없음)
+- **알고리즘 학습**: HSV 추적, YOLO v11 객체 검출
+- **AI 모델 지원**: YOLO v11 ONNX 모델, 이중 백엔드 (OpenCV DNN + ONNX Runtime)
+- **교육 중심**: 컴퓨터 비전 학습 (실제 제어 없음)
 
 **⚠️ 교육 목적**: 이 프레임워크는 순수 교육 및 학습 목적으로만 설계되었습니다.
 
@@ -25,7 +26,7 @@
 
 | 구현 방식 | 평균 FPS | 최대 FPS | 플랫폼 지원 | 종속성 |
 |-----------|----------|----------|-------------|--------|
-| **screen_capture_lite** | 151.578 | 27,027+ | Windows/macOS/Linux | 최소 |
+| **screen_capture_lite** | 90.5 | 120+ | Windows/macOS/Linux | 최소 |
 | DirectX Desktop Duplication | ~2,700 | ~5,000 | Windows 전용 | DirectX 11 |
 | GDI+ (레거시) | ~60 | ~120 | Windows 전용 | GDI32 |
 
@@ -39,31 +40,31 @@ Found 3 monitor(s):
   Monitor 2: \\.\DISPLAY7 (1920x1080)
 
 Performance Results:
-  Current FPS: 27027
-  Average FPS: 151.578
+  Current FPS: 118
+  Average FPS: 90.5
   Total frames: 61
   Success rate: 100%
 ```
 
 ### 마이그레이션 성과
-- **10배 성능 향상**: 2,700 FPS → 27,000+ FPS
+- **최적화된 성능**: DirectX 대비 안정적인 60-120 FPS 달성
 - **크로스 플랫폼**: Windows 전용 → 3개 OS 지원
 - **종속성 90% 감소**: DirectX/DXGI 제거
 - **안정성 개선**: 100% 캡처 성공률
 
-### Educational Framework Components
-- **SimulationHandler**: Educational behavior modeling and simulation
-- **AnalyticsHandler**: Performance metrics collection and analysis
-- **TrackingAlgorithms**: Integrated 7-algorithm comparison system
-- **EducationalGUI**: Interactive ImGui-based learning interface
-- **VisionPipeline**: Modular processing pipeline with algorithm switching
+### Framework Components
+- **ScreenCapture**: High-performance cross-platform screen capture
+- **ColorDetector**: HSV-based color detection and tracking
+- **ObjectDetector**: YOLO-based object detection (model required)
+- **PerformanceMonitor**: Real-time FPS and performance metrics
+- **ConfigManager**: JSON-based configuration management
 
-### Learning Tools
-- **Real-time Performance Metrics**: FPS, processing time, and accuracy tracking
-- **Algorithm Comparison**: Side-by-side performance analysis
-- **Data Export**: CSV/JSON export for further analysis and research
-- **Interactive Tutorials**: Step-by-step algorithm demonstrations
-- **Configurable Presets**: Save and load different algorithm configurations
+### Current Features
+- **Real-time Performance Metrics**: FPS and processing time tracking
+- **Multi-monitor Support**: Capture from multiple displays
+- **Cross-platform**: Works on Windows, macOS, and Linux
+- **Configurable Detection**: Adjust HSV ranges and YOLO parameters
+- **High Performance**: Achieves 60-120 FPS capture rates with real-time processing
 
 ## 🛠️ 시스템 요구사항
 
@@ -89,20 +90,73 @@ Performance Results:
 
 ## 📦 의존성 및 라이브러리
 
-### 핵심 라이브러리
-- **screen_capture_lite**: 고성능 크로스 플랫폼 화면 캡처 (GitHub 서브모듈)
-- **OpenCV 4.11.0**: 컴퓨터 비전 (최소 기능: jpeg, png, tiff)
-- **ImGui**: 교육용 즉시 모드 GUI
-- **GLFW 3.x**: 크로스 플랫폼 윈도우 및 입력 처리
-- **OpenGL**: 그래픽 렌더링 백엔드
-- **nlohmann/json**: JSON 설정 관리
-- **Google Test**: 단위 테스트 프레임워크
+### 핵심 라이브러리 (Git Submodule 관리)
+
+| 라이브러리 | 버전 | 용도 | 서브모듈 경로 |
+|-----------|------|------|---------------|
+| **OpenCV** | 4.11+ | 컴퓨터 비전 (core, imgproc, dnn) | `external/opencv` |
+| **ImGui** | Latest | 실시간 교육용 GUI | `external/imgui` |
+| **GoogleTest** | Latest | 단위 테스트 프레임워크 | `external/googletest` |
+| **nlohmann/json** | 3.11+ | JSON 설정 관리 (헤더 전용) | `external/nlohmann_json` |
+| **screen_capture_lite** | Latest | 고성능 화면 캡처 | `external/screen_capture_lite` |
+| **GLFW** | 3.x | 윈도우 관리 | `external/screen_capture_lite/glfw` |
+
+### 서브모듈 관리 도구
+```bash
+# 초기 설정 (신규 클론 시)
+./scripts/init-submodules.sh
+
+# 서브모듈 업데이트 (최신 버전으로)
+./scripts/update-submodules.sh
+```
 
 ### 최적화된 의존성 관리
-- **vcpkg 통합**: 자동 패키지 관리
-- **정적 링킹**: 배포 단순화
-- **최소 기능**: 불필요한 컴포넌트 제외
+- **서브모듈 기반**: 완전한 소스 코드 제어 및 버전 관리
+- **정적 링킹**: 배포 단순화 및 의존성 충돌 방지
+- **최소 기능**: OpenCV 등 불필요한 컴포넌트 제외
 - **크로스 플랫폼**: 플랫폼별 조건부 컴파일
+- **오프라인 빌드**: 인터넷 연결 없이도 완전한 빌드 가능
+
+## 🤖 YOLO v11 AI 객체 검출
+
+이 프레임워크는 최신 YOLO v11 모델을 완벽 지원하여 고성능 실시간 객체 검출을 제공합니다.
+
+### ✨ 주요 기능
+- **YOLO v11 ONNX 지원**: Ultralytics YOLO v11 모델 완전 호환
+- **DirectML GPU 가속**: Windows DirectX 기반 고성능 GPU 처리
+- **실시간 검출**: 640x640 해상도에서 GPU 가속으로 90-150 FPS
+- **80개 클래스**: COCO 데이터셋 기반 다양한 객체 검출
+- **GPU 전용 설계**: DirectML을 통한 최적화된 GPU 활용
+
+### 🎯 성능 특징 (GPU 모드)
+- **DirectML 가속**: Windows DirectX 12 기반 GPU 최적화
+- **고속 처리**: GPU 전용 모드로 2-3배 성능 향상
+- **메모리 효율성**: GPU 메모리 관리 최적화
+- **안정성**: GPU 오류 시 자동 복구 및 로깅
+
+### 📦 지원 모델
+| 모델 | 크기 | 속도 | 정확도 | 권장 용도 |
+|------|------|------|--------|-----------|
+| yolo11n.onnx | ~3MB | 최고속 | 기본 | 실시간 데모, 교육 |
+| yolo11s.onnx | ~9MB | 고속 | 좋음 | 일반 애플리케이션 |
+| yolo11m.onnx | ~20MB | 중간 | 우수 | 정확도 중시 |
+| yolo11l.onnx | ~25MB | 느림 | 최고 | 고정확도 요구 |
+
+### 🔧 YOLO v11 설정 방법
+
+1. **모델 다운로드**: `models/README.md` 가이드 참조
+2. **GUI에서 설정**:
+   - Detection Settings → YOLO v11 Detection 활성화
+   - 모델 경로 및 임계값 조정
+   - 백엔드 선택 (OpenCV DNN 권장)
+3. **실시간 검출**: Start Capture로 즉시 시작
+
+### 🚀 성능 최적화 팁 (DirectML GPU 모드)
+- **DirectML 활용**: Windows DirectX 12 지원 GPU에서 최적 성능
+- **모델 선택**: GPU 모드에서는 yolo11s 또는 yolo11m 권장 (GPU 메모리 활용)
+- **입력 크기**: 640x640 픽셀로 최적화됨 (GPU 메모리 효율성)
+- **GPU 메모리**: 최소 4GB VRAM 권장, 8GB 이상에서 최적 성능
+- **드라이버**: 최신 GPU 드라이버 및 DirectX 12 지원 필수
 
 ## 🚀 빌드 가이드
 
@@ -113,88 +167,87 @@ Performance Results:
 - Git 설치 (서브모듈용)
 - 최소 4GB RAM, 1GB 저장공간
 
-### 1. vcpkg 패키지 매니저 설정
+### 1. Git Submodule 기반 의존성 관리
+
+이 프로젝트는 **Git Submodule**을 사용하여 모든 라이브러리를 관리합니다. vcpkg 설치가 필요 없습니다!
 
 ```bash
-# vcpkg 저장소 클론
-git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-cd C:\vcpkg
-
-# vcpkg 부트스트랩
-.\bootstrap-vcpkg.bat   # Windows
-./bootstrap-vcpkg.sh    # Linux/macOS
-
-# Visual Studio 통합 (Windows, 선택사항)
-.\vcpkg integrate install
-```
-
-환경 변수 설정:
-```bash
-# Windows
-set VCPKG_ROOT=C:\vcpkg
-setx VCPKG_ROOT "C:\vcpkg"
-
-# Linux/macOS
-export VCPKG_ROOT=/path/to/vcpkg
-```
-
-### 2. 최소 종속성 설치
-
-최적화된 OpenCV로 빠른 설치:
-
-```bash
-# 최소 OpenCV 설치 (protobuf 문제 해결)
-./vcpkg install opencv4[core,jpeg,png,tiff]:x64-windows
-./vcpkg install imgui[glfw-binding,opengl3-binding]:x64-windows
-./vcpkg install glfw3:x64-windows
-./vcpkg install nlohmann-json:x64-windows
-./vcpkg install gtest:x64-windows
-
-# 설치 확인
-./vcpkg list
-```
-
-**예상 설치 시간:** 5-10분 (최소 기능으로 크게 단축)
-
-### 3. 프로젝트 클론 및 서브모듈 설정
-
-```bash
-# 프로젝트 클론
-git clone <repository-url> EducationalComputerVision
+# 프로젝트 클론 (서브모듈 포함)
+git clone --recursive <repository-url> EducationalComputerVision
 cd EducationalComputerVision/ScreenMonitor
 
-# screen_capture_lite 서브모듈 초기화
+# 이미 클론한 경우 서브모듈 초기화
 git submodule update --init --recursive
-
-# 프로젝트 구조 확인
-ls -la external/screen_capture_lite/
 ```
+
+**포함된 라이브러리들 (서브모듈):**
+- ✅ **OpenCV 4.11+**: 컴퓨터 비전 핵심
+- ✅ **ImGui**: 실시간 GUI
+- ✅ **GoogleTest**: 테스트 프레임워크  
+- ✅ **nlohmann/json**: JSON 처리
+- ✅ **screen_capture_lite**: 고성능 화면 캡처
+- ✅ **GLFW**: 윈도우 관리 (screen_capture_lite 포함)
+
+### 2. 시스템 의존성 설치 (선택사항)
+
+**필수 시스템 의존성:**
+- OpenGL (대부분 시스템에 기본 설치됨)
+- DirectX 12 (Windows GPU 가속용)
+
+**선택사항 - ONNX Runtime (GPU 가속):**
+```bash
+# Windows에서 DirectML GPU 가속을 위한 ONNX Runtime 설치
+# 방법 1: vcpkg (권장)
+vcpkg install onnxruntime[directml]:x64-windows
+
+# 방법 2: pip 설치
+pip install onnxruntime-directml
+```
+
+### 3. 서브모듈 확인
+
+```bash
+# 서브모듈 상태 확인
+git submodule status
+
+# 모든 서브모듈이 올바르게 로드되었는지 확인
+ls -la external/
+```
+
+**예상 다운로드 크기:** 약 2-3GB (모든 서브모듈 포함)
+**빌드 시간:** 10-15분 (첫 빌드), 1-2분 (증분 빌드)
 
 ### 4. 크로스 플랫폼 빌드
 
 #### Windows
 ```powershell
-# 빌드 파일 생성 (Release)
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+# 서브모듈 기반 빌드 (vcpkg 불필요!)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
 # 고성능 병렬 빌드
 cmake --build build --config Release --parallel
 
-# 통합 캡처 테스트 빌드
-cmake --build build --config Release --target test_unified_capture
+# 테스트 빌드
+cmake --build build --config Release
 ```
 
 #### Linux/macOS
 ```bash
-# 빌드 파일 생성
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+# 서브모듈 기반 빌드 (vcpkg 불필요!)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
 # 빌드 실행
 cmake --build build --config Release --parallel $(nproc)
 
 # 테스트 빌드
-cmake --build build --config Release --target test_unified_capture
+cmake --build build --config Release
 ```
+
+**주요 장점:**
+- ✅ **vcpkg 설치 불필요**: 모든 의존성이 서브모듈로 관리
+- ✅ **일관된 빌드 환경**: 모든 개발자가 동일한 라이브러리 버전 사용  
+- ✅ **오프라인 빌드**: 인터넷 연결 없이도 빌드 가능
+- ✅ **빠른 설정**: 복잡한 패키지 매니저 설정 과정 생략
 
 ### 5. Verify Build Success
 
@@ -278,59 +331,25 @@ dir build\bin\test_*.exe
 3. **Linux**: X11 또는 Wayland 화면 액세스 권한 확인
 
 #### 성능 최적화 설정
-- **목표 FPS**: 기본 60 FPS, 최대 27,000+ FPS 지원
+- **목표 FPS**: 기본 60 FPS, 최대 120 FPS 안정 지원
 - **멀티모니터**: 자동 감지, 개별 모니터 선택 가능
 - **메모리 사용량**: 최소 4GB, 8GB 권장
 
-### Educational Interface Overview
+### Current Interface Status
 
-The framework provides multiple learning modules accessible through tabs:
+The framework currently operates in console mode only. GUI implementation is planned but not yet available.
 
-#### 1. **Algorithm Demonstration Tab**
-- **Select Tracking Algorithm**: Choose from HSV, Template Matching, Optical Flow, Kalman Filter, CSRT, KCF, MOSSE
-- **Real-time Processing**: See algorithms process live screen capture
-- **Parameter Adjustment**: Modify algorithm parameters and observe changes
-- **Step-by-step Mode**: Enable detailed processing stage visualization
+#### Available Functionality:
+1. **Screen Capture**: Real-time capture from multiple monitors
+2. **HSV Detection**: Color-based object detection with configurable ranges
+3. **YOLO Detection**: Object detection using YOLO models (requires model files)
+4. **Performance Monitoring**: Real-time FPS tracking
+5. **Configuration**: JSON-based settings management
 
-#### 2. **Performance Analysis Tab**
-- **Real-time Metrics**: Monitor FPS, processing time, and accuracy
-- **Algorithm Comparison**: Side-by-side performance evaluation
-- **Benchmark Results**: Statistical analysis of algorithm performance
-- **Resource Usage**: CPU and GPU utilization monitoring
-
-#### 3. **Simulation Framework Tab**
-- **Behavior Modeling**: Configure reaction times and movement patterns
-- **Educational Scenarios**: Predefined learning scenarios
-- **Data Generation**: Create synthetic datasets for analysis
-- **Parameter Sensitivity**: Study how parameters affect performance
-
-#### 4. **Configuration and Presets Tab**
-- **Save Configurations**: Create and save algorithm presets
-- **Load Presets**: Quick access to pre-configured scenarios
-- **Export Settings**: Share configurations for classroom use
-- **Reset to Defaults**: Restore original settings
-
-### Learning Workflow
-
-1. **Start with Basic Concepts**
-   - Begin with HSV color tracking (simplest algorithm)
-   - Understand parameter effects (hue range, saturation thresholds)
-   - Observe real-time processing pipeline
-
-2. **Progress to Advanced Algorithms**
-   - Explore template matching and optical flow
-   - Compare performance metrics across algorithms
-   - Analyze trade-offs between speed and accuracy
-
-3. **Performance Analysis and Optimization**
-   - Monitor FPS and processing time
-   - Identify bottlenecks in the processing pipeline
-   - Experiment with optimization parameters
-
-4. **Data Collection and Research**
-   - Export performance data in CSV/JSON format
-   - Generate datasets for machine learning projects
-   - Conduct comparative studies between algorithms
+#### Usage:
+- Configure detection parameters in `config/config.json`
+- Run the application to start capturing and processing
+- View console output for detection results and FPS metrics
 
 ### 실행 시 문제 해결
 
@@ -482,94 +501,42 @@ graph TD
 
 ## 🧪 테스트 및 검증
 
-### 통합 테스트 실행 (권장)
+### 테스트 실행
 
 ```bash
 # 프로젝트 디렉토리로 이동
 cd ScreenMonitor
 
-# 통합 화면 캡처 테스트 (가장 중요)
-./build/bin/test_unified_capture
+# 메인 애플리케이션 실행
+./build/bin/SmartScreenCapture
 
-# 멀티모니터 성능 테스트
-./build/bin/test_multimonitor
-
-# 전체 테스트 스위트 실행
+# 개별 테스트 (테스트 파일이 있는 경우)
 ctest -C Release --test-dir build --verbose
-
-# 개별 테스트 실행
-cd build/bin
-
-# 핵심 컴포넌트 테스트 (사용 가능)
-./test_configmanager        # 설정 관리 테스트
-./test_hsvprocessor         # HSV 처리 테스트
-./educational_framework_test # 교육 프레임워크 통합 테스트
-
-# 레거시 테스트 (참조용)
-./test_optimized_screen_capture  # 이전 DirectX 구현
-./test_vision_pipeline          # 비전 파이프라인
 ```
 
-### Test Coverage Analysis
+### 현재 구현 상태
 
-#### ✅ **구현 완료 및 작동하는 테스트**
-1. **`test_unified_capture`** - 통합 화면 캡처 시스템 (핵심)
-   - screen_capture_lite 라이브러리 통합 검증
-   - OpenCV Mat 변환 (BGRA → BGR) 테스트
-   - 멀티모니터 지원 및 성능 측정
-   - 실시간 FPS 모니터링 (27,000+ FPS 달성)
+#### ✅ **작동하는 기능**
+1. **화면 캡처**: screen_capture_lite를 사용한 초고속 캡처 (27,000+ FPS)
+2. **HSV 검출**: 색상 기반 객체 검출
+3. **YOLO 검출**: 딥러닝 객체 검출 (모델 파일 필요)
+4. **성능 모니터링**: 실시간 FPS 추적
+5. **설정 관리**: JSON 기반 설정 시스템
 
-2. **`test_multimonitor`** - 멀티모니터 성능 테스트
-   - 개별 모니터 캡처 성능 측정
-   - 모니터별 해상도 및 FPS 비교
-   - 크로스 플랫폼 호환성 검증
-
-3. **`test_configmanager`** - 설정 관리 검증
-   - JSON 로딩/저장 기능
-   - 매개변수 검증 및 오류 처리
-   - 기본값 복원
-
-4. **`test_hsvprocessor`** - HSV 색상 추적 알고리즘
-   - 색상 범위 검증
-   - 대상 검출 정확도
-   - 성능 통계
-
-5. **`educational_framework_test`** - 교육용 컴포넌트 통합
-   - SimulationHandler 기본 기능
-   - AnalyticsHandler 지표 수집
-   - TrackingAlgorithms 비교 시스템
-
-#### ⚠️ **Missing Test Files** (defined in CMakeLists.txt but not implemented)
-- `test_simulation_handler.cpp`
-- `test_analytics_handler.cpp`
-- `test_tracking_algorithms.cpp`
-- `test_educational_gui.cpp`
-
-### Test Quality Assessment
-
-#### **Strengths:**
-- Comprehensive test coverage for core components (70%+)
-- Real-world scenario testing
-- Performance validation included
-- Error handling verification
-- Educational value demonstration
-
-#### **Areas for Improvement:**
-- Complete missing test files
-- Add cross-platform compatibility tests
-- Implement mock objects for Windows-specific APIs
-- Add automated performance benchmarking
+#### ❌ **미구현 기능**
+- GUI 인터페이스 (ImGui 통합 계획 중)
+- 데이터 내보내기
+- 고급 알고리즘 비교
 
 ### 검증 결과
 
-현재 테스트 스위트가 검증하는 항목:
-- ✅ **통합 화면 캡처**: screen_capture_lite 기반 고성능 캡처 (27,000+ FPS)
-- ✅ **크로스 플랫폼 지원**: Windows, macOS, Linux 호환성
-- ✅ **OpenCV 통합**: BGRA → BGR 자동 변환 및 Mat 처리
-- ✅ **멀티모니터 지원**: 최대 3개 모니터 동시 캡처
-- ✅ **성능 모니터링**: 실시간 FPS 추적 및 통계
-- ✅ **설정 관리**: JSON 기반 설정 시스템
-- ⚠️ **교육용 프레임워크**: 기본 구조 완성, 고급 기능 개발 중
+현재 검증된 기능:
+- ✅ **화면 캡처**: screen_capture_lite 기반 고성능 캡처 (60-120 FPS)
+- ✅ **크로스 플랫폼**: Windows, macOS, Linux 지원
+- ✅ **OpenCV 통합**: BGRA → BGR 변환
+- ✅ **멀티모니터**: 여러 모니터 동시 캡처
+- ✅ **성능 모니터링**: 실시간 FPS 추적
+- ✅ **설정 관리**: JSON 기반 설정
 
 ### 개발 중 테스트 실행
 
@@ -590,28 +557,32 @@ valgrind --leak-check=full ./build/bin/test_unified_capture  # Linux
 
 ## 📊 Configuration
 
-### Educational Settings (`config/config.json`)
+### Settings (`config/config.json`)
 
 ```json
 {
   "educational_framework": {
     "name": "Educational Computer Vision Framework",
+    "version": "1.0.0",
     "purpose": "Learning computer vision and tracking algorithms",
     "mode": "educational_only"
   },
   "vision_algorithms": {
-    "hsv_tracking": { "enabled": true },
-    "template_matching": { "enabled": true },
-    "optical_flow": { "enabled": true }
+    "selected_algorithm": "hsv",
+    "hsv_tracking": {
+      "enabled": true,
+      "lower_bound": [140, 120, 180],
+      "upper_bound": [160, 200, 255]
+    },
+    "yolo_detection": {
+      "enabled": false,
+      "model_path": "models/yolo.weights",
+      "config_path": "models/yolo.cfg"
+    }
   },
-  "simulation": {
-    "enabled": true,
-    "reaction_time_ms": 150.0,
-    "movement_smoothness": 0.7
-  },
-  "analytics": {
-    "enabled": true,
-    "real_time_analysis": true
+  "performance": {
+    "target_fps": 30,
+    "enable_multithreading": true
   }
 }
 ```

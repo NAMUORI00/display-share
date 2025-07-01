@@ -72,6 +72,18 @@ std::vector<ColorDetector::DetectionResult> ColorDetector::detectMultipleTargets
 void ColorDetector::setColorRange(const HSVRange& range)
 {
     color_range_ = range;
+    configured_ = true;
+}
+
+void ColorDetector::setColorRange(const cv::Scalar& lower, const cv::Scalar& upper)
+{
+    color_range_.h_min = static_cast<int>(lower[0]);
+    color_range_.s_min = static_cast<int>(lower[1]);
+    color_range_.v_min = static_cast<int>(lower[2]);
+    color_range_.h_max = static_cast<int>(upper[0]);
+    color_range_.s_max = static_cast<int>(upper[1]);
+    color_range_.v_max = static_cast<int>(upper[2]);
+    configured_ = true;
 }
 
 bool ColorDetector::initialize()

@@ -15,10 +15,10 @@ This is an **Educational Computer Vision Framework** built in C++17 that demonst
 
 ## Build System & Dependencies
 
-### Build Commands
+### Build Commands (Submodule-Based)
 ```bash
-# Configure build (requires vcpkg)
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+# Configure build (No vcpkg required!)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
 # Build project
 cmake --build build --config Release --parallel
@@ -27,17 +27,24 @@ cmake --build build --config Release --parallel
 ./build/bin/SmartScreenCapture
 ```
 
-### Required Dependencies (vcpkg.json)
-- **opencv4**: Computer vision (minimal: jpeg, png, tiff features only)
-- **imgui**: Educational GUI with GLFW and OpenGL3 bindings
-- **glfw3**: Cross-platform windowing
-- **nlohmann-json**: Configuration management
-- **gtest**: Unit testing framework
-- **screen_capture_lite**: High-performance capture (Git submodule)
+### Submodule Dependencies (external/)
+- **opencv**: Computer vision (core, imgproc, imgcodecs, dnn modules)
+- **imgui**: Educational GUI with GLFW and OpenGL3 backends
+- **googletest**: Unit testing framework (gtest, gmock)
+- **nlohmann_json**: JSON configuration management (header-only)
+- **screen_capture_lite**: High-performance cross-platform capture
+- **GLFW**: Cross-platform windowing (included in screen_capture_lite)
 
-### Submodule Setup
+### Submodule Management
 ```bash
+# Initialize all submodules
 git submodule update --init --recursive
+
+# Update submodules to latest versions
+git submodule update --remote
+
+# Check submodule status
+git submodule status
 ```
 
 ## Project Structure
@@ -66,10 +73,10 @@ The project uses a robust JSON configuration system with schema validation:
 - **Main Config**: `config/config.json` - Educational framework settings
 - **Schema Validation**: Built-in schema validation in ConfigManager
 - **Educational Mode**: Hardcoded to "educational_only" mode
-- **Algorithm Selection**: Configurable vision algorithms (HSV, YOLO, template matching)
+- **Algorithm Selection**: Configurable vision algorithms (HSV, YOLO)
 - **Performance Settings**: Target FPS, threading, GPU acceleration toggles
 
-Key config sections: educational_framework, vision_algorithms, simulation, analytics, gui, performance, data_export, educational_content
+Key config sections: educational_framework, vision_algorithms, analytics, gui, performance
 
 ## Development Guidelines
 
