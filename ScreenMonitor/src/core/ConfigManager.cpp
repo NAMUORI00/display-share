@@ -33,7 +33,7 @@ bool ConfigManager::loadSchema(const std::filesystem::path& schema_path) {
 json ConfigManager::getDefaultSchema() const {
     return json{
         {"type", "object"},
-        {"required", json::array({"educational_framework", "vision_algorithms", "simulation", "analytics", "gui", "performance", "data_export", "educational_content"})},
+        {"required", json::array({"educational_framework", "vision_algorithms", "analytics", "gui", "performance"})},
         {"properties", {
             {"educational_framework", {
                 {"type", "object"},
@@ -49,7 +49,7 @@ json ConfigManager::getDefaultSchema() const {
                 {"type", "object"},
                 {"required", json::array({"selected_algorithm", "hsv_tracking", "yolo_detection"})},
                 {"properties", {
-                    {"selected_algorithm", {"type", "string", "enum", json::array({"hsv", "yolo", "template_matching", "optical_flow"})}},
+                    {"selected_algorithm", {"type", "string", "enum", json::array({"hsv", "yolo"})}},
                     {"hsv_tracking", {
                         {"type", "object"},
                         {"properties", {
@@ -82,22 +82,9 @@ json ConfigManager::getDefaultSchema() const {
                     }}
                 }}
             }},
-            {"simulation", {
-                {"type", "object"},
-                {"required", json::array({"enabled", "reaction_time_ms", "movement_smoothness"})},
-                {"properties", {
-                    {"enabled", {"type", "boolean"}},
-                    {"reaction_time_ms", {"type", "number", "minimum", 0}},
-                    {"movement_smoothness", {"type", "number", "minimum", 0, "maximum", 1}},
-                    {"enable_prediction", {"type", "boolean"}},
-                    {"enable_noise_simulation", {"type", "boolean"}},
-                    {"auto_tracking_demo", {"type", "boolean"}},
-                    {"trigger_simulation", {"type", "boolean"}}
-                }}
-            }},
             {"analytics", {
                 {"type", "object"},
-                {"required", json::array({"enabled", "max_history_size"})},
+                {"required", json::array({"enabled", "max_history_size", "fps_calculation_window_sec"})},
                 {"properties", {
                     {"enabled", {"type", "boolean"}},
                     {"max_history_size", {"type", "integer", "minimum", 100, "maximum", 10000}},
@@ -109,10 +96,9 @@ json ConfigManager::getDefaultSchema() const {
             {"gui", {
                 {"type", "object"},
                 {"properties", {
-                    {"educational_mode", {"type", "boolean"}},
                     {"show_performance_metrics", {"type", "boolean"}},
-                    {"show_algorithm_comparison", {"type", "boolean"}},
-                    {"ui_scale", {"type", "number", "minimum", 0.5, "maximum", 3.0}}
+                    {"ui_scale", {"type", "number", "minimum", 0.5, "maximum", 3.0}},
+                    {"show_metrics_overlay", {"type", "boolean"}}
                 }}
             }},
             {"performance", {
@@ -121,28 +107,8 @@ json ConfigManager::getDefaultSchema() const {
                     {"target_fps", {"type", "integer", "minimum", 1, "maximum", 240}},
                     {"enable_multithreading", {"type", "boolean"}},
                     {"max_processing_threads", {"type", "integer", "minimum", 1, "maximum", 16}},
+                    {"frame_buffer_size", {"type", "integer", "minimum", 1, "maximum", 100}},
                     {"enable_gpu_acceleration", {"type", "boolean"}}
-                }}
-            }},
-            {"data_export", {
-                {"type", "object"},
-                {"properties", {
-                    {"default_format", {"type", "string", "enum", json::array({"csv", "json", "txt"})}},
-                    {"auto_timestamp", {"type", "boolean"}},
-                    {"include_frame_data", {"type", "boolean"}},
-                    {"include_intermediate_steps", {"type", "boolean"}},
-                    {"compression", {"type", "boolean"}}
-                }}
-            }},
-            {"educational_content", {
-                {"type", "object"},
-                {"properties", {
-                    {"enable_tutorials", {"type", "boolean"}},
-                    {"show_algorithm_explanations", {"type", "boolean"}},
-                    {"interactive_demos", {"type", "boolean"}},
-                    {"step_by_step_guides", {"type", "boolean"}},
-                    {"performance_comparisons", {"type", "boolean"}},
-                    {"code_examples", {"type", "boolean"}}
                 }}
             }}
         }}
@@ -172,54 +138,23 @@ json ConfigManager::getDefaultConfig() const {
                 {"config_path", "models/yolo.cfg"},
                 {"confidence_threshold", 0.5},
                 {"nms_threshold", 0.4}
-            }},
-            {"template_matching", {
-                {"enabled", true},
-                {"method", "TM_CCOEFF_NORMED"},
-                {"threshold", 0.8},
-                {"multi_scale", true}
-            }},
-            {"optical_flow", {
-                {"enabled", true},
-                {"max_corners", 100},
-                {"quality_level", 0.01},
-                {"min_distance", 10.0},
-                {"block_size", 3},
-                {"use_harris_detector", false}
-            }},
-            {"kalman_filter", {
-                {"enabled", true},
-                {"process_noise_cov", 0.01},
-                {"measurement_noise_cov", 0.1},
-                {"error_cov_post", 0.1}
             }}
-        }},
-        {"simulation", {
-            {"enabled", true},
-            {"reaction_time_ms", 150.0},
-            {"movement_smoothness", 0.7},
-            {"enable_prediction", true},
-            {"enable_noise_simulation", false},
-            {"auto_tracking_demo", false},
-            {"trigger_simulation", false}
         }},
         {"analytics", {
             {"enabled", true},
             {"max_history_size", 1000},
-            {"fps_calculation_window_sec", 5.0},
-            {"enable_real_time_analysis", true},
-            {"confidence_threshold", 0.5}
+            {"fps_calculation_window_sec", 5.0}
         }},
         {"gui", {
-            {"educational_mode", true},
             {"show_performance_metrics", true},
-            {"show_algorithm_comparison", false},
-            {"ui_scale", 1.0}
+            {"ui_scale", 1.0},
+            {"show_metrics_overlay", true}
         }},
         {"performance", {
             {"target_fps", 30},
             {"enable_multithreading", true},
             {"max_processing_threads", 4},
+            {"frame_buffer_size", 5},
             {"enable_gpu_acceleration", false}
         }}
     };
@@ -228,7 +163,7 @@ json ConfigManager::getDefaultConfig() const {
 bool ConfigManager::validateConfig(const json& config) const {
     // Basic validation - check if all required sections exist
     try {
-        const std::vector<std::string> required_sections = {"educational_framework", "vision_algorithms", "simulation", "analytics", "gui", "performance"};
+        const std::vector<std::string> required_sections = {"educational_framework", "vision_algorithms", "analytics", "gui", "performance"};
         
         for (const auto& section : required_sections) {
             if (!config.contains(section)) {
@@ -252,7 +187,7 @@ bool ConfigManager::validateConfig(const json& config) const {
         }
         
         std::string selected_algo = config["vision_algorithms"]["selected_algorithm"].get<std::string>();
-        std::vector<std::string> valid_algorithms = {"hsv", "yolo", "template_matching", "optical_flow"};
+        std::vector<std::string> valid_algorithms = {"hsv", "yolo"};
         if (std::find(valid_algorithms.begin(), valid_algorithms.end(), selected_algo) == valid_algorithms.end()) {
             return false;
         }

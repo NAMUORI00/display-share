@@ -1,6 +1,6 @@
 #pragma once
 
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <chrono>
 #include <vector>
@@ -88,6 +88,13 @@ public:
      * @param range HSV 색상 범위
      */
     void setColorRange(const HSVRange& range);
+    
+    /**
+     * @brief HSV 색상 범위 설정 (cv::Scalar 버전)
+     * @param lower 하한값 (H,S,V)
+     * @param upper 상한값 (H,S,V)
+     */
+    void setColorRange(const cv::Scalar& lower, const cv::Scalar& upper);
     
     /**
      * @brief 현재 HSV 색상 범위 반환

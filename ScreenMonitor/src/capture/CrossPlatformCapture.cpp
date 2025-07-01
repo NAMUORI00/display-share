@@ -46,20 +46,17 @@ bool CrossPlatformCapture::Initialize(const CaptureSettings& settings) {
     m_currentHeight = monitor.Height;
     
     // Create screen capture manager
-    m_captureManager = SL::Screen_Capture::CreateCaptureConfiguration([&](SL::Screen_Capture::CaptureConfiguration& config) {
-        // Set up frame callback
-        config.onNewFrame([this](const SL::Screen_Capture::Image& img, const SL::Screen_Capture::Monitor& monitor) {
-            OnNewFrame(img, monitor);
-        });
-        
-        // Set up mouse callback (optional)
-        config.onMouseChanged([this](const SL::Screen_Capture::Image* img, const SL::Screen_Capture::Point& point) {
-            OnMouseChanged(img, point);
-        });
-        
-        // Configure specific monitor
-        return SL::Screen_Capture::GetMonitors()[m_settings.selectedMonitorIndex];
-    })->start_capturing();
+    auto captureConfig = SL::Screen_Capture::CreateCaptureConfiguration([]() {
+        return SL::Screen_Capture::GetMonitors();
+    })
+    ->onNewFrame([this](const SL::Screen_Capture::Image& img, const SL::Screen_Capture::Monitor& monitor) {
+        OnNewFrame(img, monitor);
+    })
+    ->onMouseChanged([this](const SL::Screen_Capture::Image* img, const SL::Screen_Capture::MousePoint& mousepoint) {
+        OnMouseChanged(img, mousepoint.Position);
+    });
+    
+    m_captureManager = captureConfig->start_capturing();
     
     m_initialized = true;
     m_frameCount = 0;

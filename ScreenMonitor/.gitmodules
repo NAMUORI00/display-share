@@ -1,0 +1,19 @@
+[submodule "external/screen_capture_lite"]
+	path = external/screen_capture_lite
+	url = https://github.com/smasherprog/screen_capture_lite.git
+
+[submodule "external/opencv"]
+	path = external/opencv
+	url = https://github.com/opencv/opencv.git
+
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/ocornut/imgui.git
+
+[submodule "external/nlohmann_json"]
+	path = external/nlohmann_json
+	url = https://github.com/nlohmann/json.git
+
+[submodule "external/googletest"]
+	path = external/googletest
+	url = https://github.com/google/googletest.git
