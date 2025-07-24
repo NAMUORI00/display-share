@@ -33,7 +33,8 @@ bool ConfigManager::loadSchema(const std::filesystem::path& schema_path) {
 json ConfigManager::getDefaultSchema() const {
     return json{
         {"type", "object"},
-        {"required", json::array({"production_system", "vision_algorithms", "analytics", "gui", "performance"})},}, "properties", {
+        {"required", json::array({"production_system", "vision_algorithms", "analytics", "gui", "performance"})},
+        {"properties", {
             {"production_system", {
                 {"type", "object"},
                 {"required", json::array({"name", "version", "purpose", "mode"})},
@@ -44,7 +45,6 @@ json ConfigManager::getDefaultSchema() const {
                     {"mode", {"type", "string", "enum", json::array({"production_mode"})}}
                 }}
             }},
-        {"properties", {
             {"vision_algorithms", {
                 {"type", "object"},
                 {"required", json::array({"selected_algorithm", "hsv_tracking", "yolo_detection"})},
@@ -117,11 +117,11 @@ json ConfigManager::getDefaultSchema() const {
 
 json ConfigManager::getDefaultConfig() const {
     return json{
-        {"educational_framework", {
-            {"name", "Educational Computer Vision Framework"},
+        {"production_system", {
+            {"name", "Professional Screen Capture & Computer Vision System"},
             {"version", "1.0.0"},
-            {"purpose", "Learning computer vision and tracking algorithms"},
-            {"mode", "educational_only"}
+            {"purpose", "High-performance real-time screen capture and computer vision processing"},
+            {"mode", "production_mode"}
         }},
         {"vision_algorithms", {
             {"selected_algorithm", "hsv"},
@@ -163,7 +163,7 @@ json ConfigManager::getDefaultConfig() const {
 bool ConfigManager::validateConfig(const json& config) const {
     // Basic validation - check if all required sections exist
     try {
-        const std::vector<std::string> required_sections = {"educational_framework", "vision_algorithms", "analytics", "gui", "performance"};
+        const std::vector<std::string> required_sections = {"production_system", "vision_algorithms", "analytics", "gui", "performance"};
         
         for (const auto& section : required_sections) {
             if (!config.contains(section)) {
@@ -171,13 +171,13 @@ bool ConfigManager::validateConfig(const json& config) const {
             }
         }
         
-        // Validate educational_framework section
-        if (!config["educational_framework"].contains("mode")) {
+        // Validate production_system section
+        if (!config["production_system"].contains("mode")) {
             return false;
         }
         
-        std::string mode = config["educational_framework"]["mode"].get<std::string>();
-        if (mode != "educational_only") {
+        std::string mode = config["production_system"]["mode"].get<std::string>();
+        if (mode != "production_mode") {
             return false;
         }
         
@@ -402,9 +402,8 @@ bool ConfigManager::createDefaultConfig(const std::string& file_path) {
 
 std::string ConfigManager::sectionToString(Section section) {
     switch (section) {
-        case Section::EDUCATIONAL_FRAMEWORK: return "educational_framework";
+        case Section::PRODUCTION_SYSTEM: return "production_system";
         case Section::VISION_ALGORITHMS: return "vision_algorithms";
-        case Section::SIMULATION: return "simulation";
         case Section::ANALYTICS: return "analytics";
         case Section::GUI: return "gui";
         case Section::PERFORMANCE: return "performance";
@@ -413,9 +412,8 @@ std::string ConfigManager::sectionToString(Section section) {
 }
 
 std::optional<ConfigManager::Section> ConfigManager::stringToSection(const std::string& section_name) {
-    if (section_name == "educational_framework") return Section::EDUCATIONAL_FRAMEWORK;
+    if (section_name == "production_system") return Section::PRODUCTION_SYSTEM;
     if (section_name == "vision_algorithms") return Section::VISION_ALGORITHMS;
-    if (section_name == "simulation") return Section::SIMULATION;
     if (section_name == "analytics") return Section::ANALYTICS;
     if (section_name == "gui") return Section::GUI;
     if (section_name == "performance") return Section::PERFORMANCE;

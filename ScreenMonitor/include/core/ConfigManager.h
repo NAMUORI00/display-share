@@ -29,9 +29,8 @@ public:
      * @brief Configuration sections enum for type safety
      */
     enum class Section {
-        EDUCATIONAL_FRAMEWORK,
+        PRODUCTION_SYSTEM,
         VISION_ALGORITHMS,
-        SIMULATION,
         ANALYTICS,
         GUI,
         PERFORMANCE
