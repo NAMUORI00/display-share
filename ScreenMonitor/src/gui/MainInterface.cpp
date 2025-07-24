@@ -3,9 +3,15 @@
 #include <sstream>
 #include <filesystem>
 #include <cstring>
+#include <chrono>
+#include <iomanip>
 
-// ImGui with full backend support
+// ImGui core (always available)
 #include <imgui.h>
+#include <imgui_internal.h>
+
+#if GUI_ENABLED
+// ImGui with full backend support
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
@@ -13,14 +19,17 @@
 static void glfw_error_callback(int error, const char* description) {
     std::cerr << "GLFW Error " << error << ": " << description << std::endl;
 }
+#endif
 
 MainInterface::MainInterface() 
     : m_initialized(false)
+#if GUI_ENABLED
     , m_window(nullptr)
     , m_imguiContext(nullptr)
     , m_frameTexture(0)
     , m_textureWidth(0)
     , m_textureHeight(0)
+#endif
     , m_captureEnabled(false)
     , m_hsvEnabled(false)
     , m_yoloEnabled(false)
@@ -48,6 +57,7 @@ MainInterface::~MainInterface() {
 }
 
 bool MainInterface::Initialize() {
+#if GUI_ENABLED
     std::cout << "Initializing GUI with GLFW + OpenGL3..." << std::endl;
     
     // GLFW 에러 콜백 설정
@@ -86,6 +96,8 @@ bool MainInterface::Initialize() {
     
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // 도킹 활성화
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // 다중 뷰포트 활성화
     
     // ImGui 스타일 설정
     ImGui::StyleColorsDark();
@@ -127,13 +139,25 @@ bool MainInterface::Initialize() {
     // FPS 히스토리 초기화
     m_fpsHistory.reserve(FPS_HISTORY_SIZE);
 
+    // 스트림 리다이렉션 설정
+    SetupStreamRedirection();
+
     m_initialized = true;
     std::cout << "MainInterface initialized successfully with GUI enabled" << std::endl;
     return true;
+#else
+    std::cout << "GUI disabled - running in headless mode" << std::endl;
+    m_initialized = true;
+    return true;
+#endif
 }
 
 void MainInterface::Cleanup() {
     if (m_initialized) {
+        // 스트림 리다이렉션 해제 (cout 사용 전에)
+        CleanupStreamRedirection();
+        
+#if GUI_ENABLED
         std::cout << "Cleaning up GUI..." << std::endl;
         
         // OpenGL 텍스처 정리
@@ -157,12 +181,16 @@ void MainInterface::Cleanup() {
         }
         glfwTerminate();
 
-        m_initialized = false;
         std::cout << "GUI cleanup completed" << std::endl;
+#else
+        std::cout << "Headless mode cleanup completed" << std::endl;
+#endif
+        m_initialized = false;
     }
 }
 
 void MainInterface::Render() {
+#if GUI_ENABLED
     if (!m_initialized || !m_window) return;
 
     // 새 ImGui 프레임 시작
@@ -177,11 +205,11 @@ void MainInterface::Render() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
-    // SetNextWindowViewport는 docking branch에서만 사용 가능
+    ImGui::SetNextWindowViewport(viewport->ID);
     
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -190,9 +218,31 @@ void MainInterface::Render() {
     ImGui::Begin("DockSpace", nullptr, window_flags);
     ImGui::PopStyleVar(3);
 
-    // 도킹 스페이스 (간단한 레이아웃으로 대체)
-    // ImGui::DockSpace는 특별한 docking branch에서만 사용 가능
-    ImGui::Text("SmartScreenCapture Dashboard");
+    // 도킹 스페이스 생성
+    ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+    if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
+        // 처음 실행 시 도킹 레이아웃 설정
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+        
+        // 도킹 분할 설정
+        ImGuiID dock_main_id = dockspace_id;
+        ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
+        ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.25f, nullptr, &dock_main_id);
+        ImGuiID dock_id_down = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.25f, nullptr, &dock_main_id);
+        
+        // 창들을 도킹 영역에 연결
+        ImGui::DockBuilderDockWindow("Capture Settings", dock_id_left);
+        ImGui::DockBuilderDockWindow("Detection Settings", dock_id_left);
+        ImGui::DockBuilderDockWindow("Performance Monitor", dock_id_right);
+        ImGui::DockBuilderDockWindow("Screen Preview", dock_main_id);
+        ImGui::DockBuilderDockWindow("Console", dock_id_down);
+        
+        ImGui::DockBuilderFinish(dockspace_id);
+    }
+    
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
     
     // 각 패널 렌더링
     RenderCapturePanel();
@@ -201,6 +251,9 @@ void MainInterface::Render() {
     RenderFrame();
     
     ImGui::End();
+    
+    // 콘솔 패널
+    RenderConsolePanel();
     
     // 상태바
     RenderStatusBar();
@@ -217,17 +270,25 @@ void MainInterface::Render() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     
     glfwSwapBuffers(m_window);
+#else
+    // Headless mode - no rendering
+#endif
 }
 
 void MainInterface::HandleEvents() {
+#if GUI_ENABLED
     if (!m_initialized || !m_window) return;
     
     glfwPollEvents();
+#else
+    // Headless mode - no events to handle
+#endif
 }
 
 void MainInterface::UpdateFrame(const cv::Mat& frame) {
     if (!m_initialized) return;
     
+#if GUI_ENABLED
     // Frame update with OpenGL texture
     if (!frame.empty()) {
         m_textureWidth = frame.cols;
@@ -235,6 +296,12 @@ void MainInterface::UpdateFrame(const cv::Mat& frame) {
         m_currentFrame = frame.clone();
         UpdateGLTexture(frame);
     }
+#else
+    // Headless mode - store frame data without OpenGL
+    if (!frame.empty()) {
+        m_currentFrame = frame.clone();
+    }
+#endif
 }
 
 void MainInterface::UpdateDetections(const std::vector<cv::Rect>& detections) {
@@ -261,11 +328,39 @@ void MainInterface::UpdateFPS(float fps) {
 }
 
 bool MainInterface::ShouldClose() const {
+#if GUI_ENABLED
     return m_window ? glfwWindowShouldClose(m_window) : false;
+#else
+    return false; // Headless mode never closes from GUI
+#endif
+}
+
+void MainInterface::AddLogMessage(const std::string& message, int level) {
+    LogEntry entry;
+    entry.message = message;
+    entry.level = level;
+    
+    // 현재 시간을 타임스탬프로 추가
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    localtime_s(&tm_buf, &time_t);
+    
+    std::stringstream ss;
+    ss << std::put_time(&tm_buf, "%H:%M:%S");
+    entry.timestamp = ss.str();
+    
+    m_logMessages.push_back(entry);
+    
+    // 최대 로그 수 제한
+    if (m_logMessages.size() > MAX_LOG_ENTRIES) {
+        m_logMessages.erase(m_logMessages.begin());
+    }
 }
 
 // Private helper methods
 bool MainInterface::CreateGLTexture() {
+#if GUI_ENABLED
     glGenTextures(1, &m_frameTexture);
     if (m_frameTexture == 0) {
         std::cerr << "Failed to generate OpenGL texture" << std::endl;
@@ -284,9 +379,13 @@ bool MainInterface::CreateGLTexture() {
     
     glBindTexture(GL_TEXTURE_2D, 0);
     return true;
+#else
+    return true; // Headless mode - no texture creation needed
+#endif
 }
 
 void MainInterface::UpdateGLTexture(const cv::Mat& frame) {
+#if GUI_ENABLED
     if (m_frameTexture == 0 || frame.empty()) return;
     
     // OpenCV Mat을 OpenGL 텍스처로 업로드
@@ -300,10 +399,14 @@ void MainInterface::UpdateGLTexture(const cv::Mat& frame) {
                  0, GL_RGB, GL_UNSIGNED_BYTE, rgb_frame.data);
     
     glBindTexture(GL_TEXTURE_2D, 0);
+#else
+    // Headless mode - no OpenGL texture update
+#endif
 }
 
 void MainInterface::RenderFrame() {
-    ImGui::Begin("Live Capture");
+#if GUI_ENABLED
+    ImGui::Begin("Screen Preview");
     
     if (m_frameTexture != 0 && m_textureWidth > 0 && m_textureHeight > 0) {
         // 사용 가능한 영역 크기
@@ -339,9 +442,13 @@ void MainInterface::RenderFrame() {
     }
     
     ImGui::End();
+#else
+    // Headless mode - no frame rendering
+#endif
 }
 
 void MainInterface::RenderMenuBar() {
+#if GUI_ENABLED
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Save Config")) {
@@ -373,9 +480,13 @@ void MainInterface::RenderMenuBar() {
         
         ImGui::EndMainMenuBar();
     }
+#else
+    // Headless mode - no menu bar
+#endif
 }
 
 void MainInterface::RenderCapturePanel() {
+#if GUI_ENABLED
     ImGui::Begin("Capture Settings");
     
     // 캡처 시작/중지 버튼
@@ -422,9 +533,13 @@ void MainInterface::RenderCapturePanel() {
     ImGui::Text("Current FPS: %.1f", m_currentFPS);
     
     ImGui::End();
+#else
+    // Headless mode - no capture panel
+#endif
 }
 
 void MainInterface::RenderDetectionPanel() {
+#if GUI_ENABLED
     ImGui::Begin("Detection Settings");
     
     // HSV 검출 설정
@@ -464,9 +579,13 @@ void MainInterface::RenderDetectionPanel() {
     ImGui::Text("Detections: %zu", m_detections.size());
     
     ImGui::End();
+#else
+    // Headless mode - no detection panel
+#endif
 }
 
 void MainInterface::RenderPerformancePanel() {
+#if GUI_ENABLED
     ImGui::Begin("Performance Monitor");
     
     // FPS 그래프
@@ -495,9 +614,13 @@ void MainInterface::RenderPerformancePanel() {
     ImGui::Text("GPU Usage: N/A");
     
     ImGui::End();
+#else
+    // Headless mode - no performance panel
+#endif
 }
 
 void MainInterface::RenderStatusBar() {
+#if GUI_ENABLED
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImVec2 work_pos = viewport->WorkPos;
     ImVec2 work_size = viewport->WorkSize;
@@ -519,4 +642,98 @@ void MainInterface::RenderStatusBar() {
     ImGui::Text("GUI: Enabled");
     
     ImGui::End();
+#else
+    // Headless mode - no status bar
+#endif
+}
+
+// GuiStreamBuf 구현
+int GuiStreamBuf::overflow(int c) {
+    if (c != EOF) {
+        if (c == '\n') {
+            // 줄 바꿈 시 현재 버퍼를 로그에 추가
+            if (!m_buffer.empty() && m_gui) {
+                m_gui->AddLogMessage(m_buffer, m_logLevel);
+                m_buffer.clear();
+            }
+        } else {
+            m_buffer += static_cast<char>(c);
+        }
+    }
+    return c;
+}
+
+void MainInterface::SetupStreamRedirection() {
+    // 원본 스트림 버퍼 백업
+    m_originalCout = std::cout.rdbuf();
+    m_originalCerr = std::cerr.rdbuf();
+    
+    // 커스텀 스트림 버퍼 생성 및 리다이렉션
+    m_coutRedirect = std::make_unique<GuiStreamBuf>(this, 0); // Info level
+    m_cerrRedirect = std::make_unique<GuiStreamBuf>(this, 2); // Error level
+    
+    std::cout.rdbuf(m_coutRedirect.get());
+    std::cerr.rdbuf(m_cerrRedirect.get());
+}
+
+void MainInterface::CleanupStreamRedirection() {
+    // 원본 스트림 버퍼 복원
+    if (m_originalCout) {
+        std::cout.rdbuf(m_originalCout);
+    }
+    if (m_originalCerr) {
+        std::cerr.rdbuf(m_originalCerr);
+    }
+    
+    // 커스텀 스트림 버퍼 해제
+    m_coutRedirect.reset();
+    m_cerrRedirect.reset();
+}
+
+void MainInterface::RenderConsolePanel() {
+#if GUI_ENABLED
+    // 하단에 접을 수 있는 콘솔 패널
+    if (ImGui::Begin("Console", nullptr, ImGuiWindowFlags_None)) {
+        // 콘솔 제어 버튼들
+        if (ImGui::Button("Clear")) {
+            m_logMessages.clear();
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto-scroll", &m_autoScrollConsole);
+        ImGui::SameLine();
+        ImGui::Text("(%zu entries)", m_logMessages.size());
+        
+        ImGui::Separator();
+        
+        // 스크롤 가능한 로그 영역
+        if (ImGui::BeginChild("ConsoleScrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar)) {
+            for (const auto& entry : m_logMessages) {
+                // 로그 레벨에 따른 색상 설정
+                ImVec4 color;
+                switch (entry.level) {
+                    case 1: // Warning
+                        color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow
+                        break;
+                    case 2: // Error
+                        color = ImVec4(1.0f, 0.0f, 0.0f, 1.0f); // Red
+                        break;
+                    default: // Info
+                        color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // White
+                        break;
+                }
+                
+                ImGui::PushStyleColor(ImGuiCol_Text, color);
+                ImGui::Text("[%s] %s", entry.timestamp.c_str(), entry.message.c_str());
+                ImGui::PopStyleColor();
+            }
+            
+            // 자동 스크롤
+            if (m_autoScrollConsole && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+                ImGui::SetScrollHereY(1.0f);
+            }
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+#endif
 }
