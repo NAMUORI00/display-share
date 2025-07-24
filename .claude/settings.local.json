@@ -66,7 +66,14 @@
       "Bash(sudo apt install:*)",
       "Bash(pkg-config:*)",
       "Bash(pkill:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "mcp__sequential__sequentialthinking",
+      "mcp__time__current_time",
+      "mcp__exa__web_search_exa",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(timeout 60 cmake -B build-test -S . -DCMAKE_BUILD_TYPE=Release)",
+      "Bash(timeout 120 cmake --build build-test --config Release --parallel 4)"
     ],
     "deny": []
   }
