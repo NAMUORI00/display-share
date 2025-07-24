@@ -33,18 +33,18 @@ bool ConfigManager::loadSchema(const std::filesystem::path& schema_path) {
 json ConfigManager::getDefaultSchema() const {
     return json{
         {"type", "object"},
-        {"required", json::array({"educational_framework", "vision_algorithms", "analytics", "gui", "performance"})},
-        {"properties", {
-            {"educational_framework", {
+        {"required", json::array({"production_system", "vision_algorithms", "analytics", "gui", "performance"})},}, "properties", {
+            {"production_system", {
                 {"type", "object"},
                 {"required", json::array({"name", "version", "purpose", "mode"})},
                 {"properties", {
                     {"name", {"type", "string"}},
                     {"version", {"type", "string"}},
                     {"purpose", {"type", "string"}},
-                    {"mode", {"type", "string", "enum", json::array({"educational_only"})}}
+                    {"mode", {"type", "string", "enum", json::array({"production_mode"})}}
                 }}
             }},
+        {"properties", {
             {"vision_algorithms", {
                 {"type", "object"},
                 {"required", json::array({"selected_algorithm", "hsv_tracking", "yolo_detection"})},

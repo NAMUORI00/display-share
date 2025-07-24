@@ -12,8 +12,8 @@
 #include "core/ConfigManager.h"
 
 int main() {
-    std::cout << "=== SmartScreenCapture v1.0 ===" << std::endl;
-    std::cout << "High-Performance Screen Capture & Real-time Computer Vision" << std::endl;
+    std::cout << "=== Professional Screen Capture & Computer Vision System v1.0 ===" << std::endl;
+    std::cout << "Enterprise-Grade High-Performance Screen Capture & Real-time Computer Vision" << std::endl;
     std::cout << "============================================" << std::endl;
     
     // Display system information
@@ -73,7 +73,7 @@ int main() {
     
     std::cout << "\n=== Application Shutdown ===" << std::endl;
     std::cout << "Smart Screen Capture system has been shut down successfully." << std::endl;
-    std::cout << "Thank you for using the Educational Computer Vision Framework!" << std::endl;
+    std::cout << "Thank you for using the Professional Screen Capture & Computer Vision System!" << std::endl;
     
     return 0;
 }

@@ -1,6 +1,6 @@
-# EducationalComputerVision
+# Professional Screen Capture & Computer Vision System
 
-고성능 실시간 화면 캡처 및 컴퓨터 비전 교육 애플리케이션 - **screen_capture_lite** 기반 차세대 프레임워크
+엔터프라이즈급 고성능 실시간 화면 캡처 및 컴퓨터 비전 처리 시스템 - **screen_capture_lite** 기반 차세대 프로덕션 프레임워크
 
 ## 🚀 주요 특징
 
@@ -11,14 +11,14 @@
 - **최소 종속성**: 외부 라이브러리 의존성 최소화
 - **실시간 처리**: BGRA → BGR 자동 변환 및 OpenCV 통합
 
-### 🔬 교육용 컴퓨터 비전
-- **OpenCV 4**: DNN 모듈 포함, 최적화된 기능 세트
-- **실시간 분석**: 성능 통계 및 FPS 모니터링
-- **알고리즘 학습**: HSV 추적, YOLO v11 객체 검출
+### 🔬 엔터프라이즈 컴퓨터 비전
+- **OpenCV 4**: DNN 모듈 포함, 프로덕션 최적화된 기능 세트
+- **실시간 분석**: 고급 성능 통계 및 FPS 모니터링
+- **프로덕션 알고리즘**: HSV 추적, YOLO v11 객체 검출
 - **AI 모델 지원**: YOLO v11 ONNX 모델, 이중 백엔드 (OpenCV DNN + ONNX Runtime)
-- **교육 중심**: 컴퓨터 비전 학습 (실제 제어 없음)
+- **비즈니스 중심**: 상업적 컴퓨터 비전 처리 및 분석
 
-**⚠️ 교육 목적**: 이 프레임워크는 순수 교육 및 학습 목적으로만 설계되었습니다.
+**🏢 프로덕션 목적**: 이 시스템은 엔터프라이즈급 상업적 응용을 위해 설계되었습니다.
 
 ## 📊 성능 벤치마크
 
@@ -95,7 +95,7 @@ Performance Results:
 | 라이브러리 | 버전 | 용도 | 서브모듈 경로 |
 |-----------|------|------|---------------|
 | **OpenCV** | 4.11+ | 컴퓨터 비전 (core, imgproc, dnn) | `external/opencv` |
-| **ImGui** | Latest | 실시간 교육용 GUI | `external/imgui` |
+| **ImGui** | Latest | 실시간 프로페셔널 GUI | `external/imgui` |
 | **GoogleTest** | Latest | 단위 테스트 프레임워크 | `external/googletest` |
 | **nlohmann/json** | 3.11+ | JSON 설정 관리 (헤더 전용) | `external/nlohmann_json` |
 | **screen_capture_lite** | Latest | 고성능 화면 캡처 | `external/screen_capture_lite` |
@@ -137,7 +137,7 @@ Performance Results:
 ### 📦 지원 모델
 | 모델 | 크기 | 속도 | 정확도 | 권장 용도 |
 |------|------|------|--------|-----------|
-| yolo11n.onnx | ~3MB | 최고속 | 기본 | 실시간 데모, 교육 |
+| yolo11n.onnx | ~3MB | 최고속 | 기본 | 실시간 처리, 프로덕션 |
 | yolo11s.onnx | ~9MB | 고속 | 좋음 | 일반 애플리케이션 |
 | yolo11m.onnx | ~20MB | 중간 | 우수 | 정확도 중시 |
 | yolo11l.onnx | ~25MB | 느림 | 최고 | 고정확도 요구 |
@@ -319,7 +319,7 @@ dir build\bin\test_*.exe
 # 성능 측정 포함 멀티모니터 테스트
 ./build/bin/test_multimonitor
 
-# 메인 교육용 애플리케이션
+# 메인 프로덕션 애플리케이션
 ./build/bin/EducationalComputerVision
 ```
 
@@ -394,7 +394,7 @@ ScreenMonitor/
 │   │   ├── test_unified_capture.cpp    # 통합 캡처 테스트 (권장)
 │   │   ├── test_multimonitor.cpp       # 멀티모니터 테스트
 │   │   └── test_screen_capture.cpp     # 기본 캡처 테스트
-│   ├── educational/             # 교육용 프레임워크 (개발 중)
+│   ├── production/              # 프로덕션 프레임워크 (개발 중)
 │   │   ├── EducationalGUI.cpp      # ImGui 기반 인터페이스
 │   │   ├── SimulationHandler.cpp   # 행동 시뮬레이션
 │   │   └── AnalyticsHandler.cpp    # 성능 분석
@@ -437,13 +437,13 @@ VisionPipeline
 ├── VisionAlgorithmFactory # 알고리즘 인스턴스화
 ├── HSVProcessor          # 색상 기반 추적
 ├── YOLOProcessor         # 딥러닝 검출 (비활성화)
-└── TrackingAlgorithms    # 7-알고리즘 통합 (교육용)
+└── TrackingAlgorithms    # 7-알고리즘 통합 (프로덕션용)
 ```
 
-#### 3. **교육용 프레임워크** (현재 개발 중)
+#### 3. **프로덕션 프레임워크** (현재 개발 중)
 ```cpp
 Educational Components
-├── SimulationHandler     # 행동 모델링 (교육 목적)
+├── SimulationHandler     # 행동 모델링 (비즈니스 분석)
 ├── AnalyticsHandler      # 성능 지표 분석
 ├── TrackingAlgorithms    # 알고리즘 비교 시스템
 └── EducationalGUI        # 상호작용 인터페이스
@@ -493,7 +493,7 @@ graph TD
     B --> G[성능 모니터링]
     G --> H[FPS 추적]
     G --> I[멀티모니터 지원]
-    B --> J[교육용 인터페이스]
+    B --> J[프로페셔널 인터페이스]
     J --> K[성능 데이터]
     H --> K
     I --> K
@@ -609,66 +609,66 @@ valgrind --leak-check=full ./build/bin/test_unified_capture  # Linux
 - [Computer Vision Course Materials](https://github.com/topics/computer-vision)
 - [Tracking Algorithm Papers](https://paperswithcode.com/task/visual-object-tracking)
 
-## 🤝 Contributing to Education
+## 🤝 Contributing to Production System
 
-We welcome contributions that enhance the educational value:
+We welcome contributions that enhance the production system:
 
-1. **Algorithm Implementations**: Add new tracking methods with educational explanations
-2. **Tutorial Content**: Improve step-by-step guides and explanations
-3. **Visualization Tools**: Enhance educational visualization features
-4. **Documentation**: Add learning materials and examples
-5. **Test Cases**: Create educational test scenarios
+1. **Algorithm Implementations**: Add new tracking methods with performance optimizations
+2. **Documentation**: Improve technical documentation and API guides
+3. **Visualization Tools**: Enhance professional visualization features
+4. **Performance**: Add optimization and scalability improvements
+5. **Test Cases**: Create comprehensive production test scenarios
 
 ### Contribution Guidelines
 
-- All contributions must maintain educational focus
-- Include detailed explanations and comments
-- Provide performance analysis and comparisons
-- Add appropriate test cases and documentation
+- All contributions must maintain production quality standards
+- Include detailed technical documentation and comments
+- Provide performance analysis and benchmarks
+- Add appropriate test cases and validation
 
 ## ⚖️ License and Ethics
 
-### Educational License
+### Commercial License
 
-This project is released under MIT License for educational purposes.
+This project is released under MIT License for commercial and production use.
 
-### Ethical Guidelines
+### Usage Guidelines
 
-This framework is designed with educational ethics in mind:
-- ✅ Learning computer vision concepts
-- ✅ Algorithm research and study
+This system is designed for professional applications:
+- ✅ Commercial computer vision processing
+- ✅ Enterprise analytics and monitoring
 - ✅ Performance analysis and optimization
-- ✅ Academic research and education
-- ❌ Any form of automation or control
-- ❌ Unethical applications
-- ❌ Gaming or cheating software
+- ✅ Business intelligence and automation
+- ✅ Real-time data processing
+- ⚠️ Ensure compliance with applicable privacy laws
+- ⚠️ Follow enterprise security best practices
 
-## 🆘 Support and Learning Help
+## 🆘 Support and Technical Help
 
 ### Getting Help
 
 1. **Documentation**: Check CLAUDE.md for development guidance
-2. **Issues**: Report educational framework issues on GitHub
-3. **Discussions**: Join educational computer vision communities
-4. **Learning Groups**: Form study groups with other learners
+2. **Issues**: Report production system issues on GitHub
+3. **Discussions**: Join professional computer vision communities
+4. **Enterprise Support**: Contact for commercial support options
 
-### Common Educational Use Cases
+### Common Production Use Cases
 
-- **Computer Science Courses**: Algorithm implementation assignments
-- **Research Projects**: Performance comparison studies
-- **Self-Learning**: Hands-on computer vision practice
-- **Academic Research**: Tracking algorithm development
+- **Business Analytics**: Real-time screen monitoring and analysis
+- **Quality Assurance**: Automated visual testing and validation
+- **Performance Monitoring**: System performance tracking and optimization
+- **Enterprise Solutions**: Advanced tracking and monitoring systems
 
-## 🎯 Educational Goals
+## 🎯 Production Goals
 
-This framework aims to help learners:
+This system aims to provide enterprises with:
 
-1. **Understand Core Concepts**: Grasp fundamental computer vision principles
-2. **Compare Algorithms**: Analyze trade-offs between different approaches  
-3. **Measure Performance**: Learn evaluation and benchmarking techniques
-4. **Develop Skills**: Gain practical experience with real implementations
-5. **Build Knowledge**: Create a foundation for advanced computer vision study
+1. **High Performance**: Deliver exceptional real-time processing capabilities
+2. **Scalable Architecture**: Support enterprise-grade deployment requirements
+3. **Advanced Analytics**: Provide comprehensive performance monitoring and insights
+4. **Professional Tools**: Enable sophisticated computer vision applications
+5. **Business Value**: Create measurable ROI through automated visual processing
 
 ---
 
-**Remember**: This is an educational tool designed to help you learn computer vision and tracking algorithms. Use it responsibly and ethically for learning purposes only.
+**Professional System**: This is an enterprise-grade computer vision system designed for commercial applications. Deploy responsibly following industry best practices and compliance requirements.
