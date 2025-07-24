@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an **Educational Computer Vision Framework** built in C++17 that demonstrates high-performance screen capture and computer vision algorithms for learning purposes. The project integrates the screen_capture_lite library to achieve 27,000+ FPS cross-platform screen capture with educational overlays for algorithm comparison.
+This is a **Professional Screen Capture & Computer Vision System** built in C++17 that delivers enterprise-grade high-performance screen capture and computer vision processing. The project integrates the screen_capture_lite library to achieve 27,000+ FPS cross-platform screen capture with advanced real-time processing capabilities.
 
 **Key Architecture Components:**
 - **Core Application**: PerformanceMonitor class as main entry point
 - **Screen Capture**: screen_capture_lite integration for cross-platform capture
 - **Computer Vision**: HSV tracking, template matching, optical flow algorithms  
-- **Educational Framework**: Algorithm comparison and performance analysis tools
+- **Professional Analytics**: Advanced performance monitoring and optimization tools
 - **Configuration**: JSON-based config system with schema validation
 
 ## Build System & Dependencies
@@ -29,7 +29,7 @@ cmake --build build --config Release --parallel
 
 ### Submodule Dependencies (external/)
 - **opencv**: Computer vision (core, imgproc, imgcodecs, dnn modules)
-- **imgui**: Educational GUI with GLFW and OpenGL3 backends
+- **imgui**: Professional GUI with GLFW and OpenGL3 backends
 - **googletest**: Unit testing framework (gtest, gmock)
 - **nlohmann_json**: JSON configuration management (header-only)
 - **screen_capture_lite**: High-performance cross-platform capture
@@ -70,20 +70,20 @@ config/config.json              # Main configuration file
 
 The project uses a robust JSON configuration system with schema validation:
 
-- **Main Config**: `config/config.json` - Educational framework settings
+- **Main Config**: `config/config.json` - Production system settings
 - **Schema Validation**: Built-in schema validation in ConfigManager
-- **Educational Mode**: Hardcoded to "educational_only" mode
+- **Production Mode**: Optimized for "production_mode" deployment
 - **Algorithm Selection**: Configurable vision algorithms (HSV, YOLO)
 - **Performance Settings**: Target FPS, threading, GPU acceleration toggles
 
-Key config sections: educational_framework, vision_algorithms, analytics, gui, performance
+Key config sections: production_system, vision_algorithms, analytics, gui, performance
 
 ## Development Guidelines
 
 ### Code Style
 - C++17 standard required
 - Cross-platform compatibility (Windows/macOS/Linux)
-- Educational focus - all features designed for learning
+- Production focus - all features optimized for enterprise deployment
 - Performance-oriented with real-time metrics
 - Schema-validated configuration system
 
@@ -95,16 +95,17 @@ Key config sections: educational_framework, vision_algorithms, analytics, gui, p
 
 ### Testing
 - Use Google Test framework for unit tests
-- Focus on educational component validation
+- Focus on production system validation
 - Performance benchmarking for capture system
 - Cross-platform compatibility testing
 
-## Educational Framework Notes
+## Production System Features
 
-This is explicitly an **educational tool** designed for:
-- Learning computer vision algorithms
-- Algorithm performance comparison  
-- Real-time processing demonstration
-- Academic research and teaching
+This is a **professional-grade system** designed for:
+- High-performance real-time computer vision processing
+- Enterprise-level screen capture and analysis
+- Production-ready algorithm deployment
+- Commercial applications and business intelligence
+- Advanced performance monitoring and analytics
 
-The framework includes simulation modes, step-by-step algorithm demonstrations, and performance analytics specifically for educational purposes.
+The system includes optimized processing modes, real-time analytics, and enterprise-grade performance monitoring specifically for production environments.
