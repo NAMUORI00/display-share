@@ -159,11 +159,12 @@ add_executable(${PROJECT_NAME}
     src/monitoring/SimpleMetrics.cpp
     
     
-    # GUI interface (temporarily disabled for cleanup)
+    # GUI interface (temporarily disabled for Phase 2 testing)
     # src/gui/MainInterface.cpp
     
     # Capture implementation
     src/capture/ScreenCaptureLiteDevice.cpp
+    src/capture/CenterRegionCapture.cpp
 )
 
 # Set as console application for Phase 1 cleanup test
@@ -273,11 +274,12 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/monitoring/SimpleMetrics.cpp
     
     
-    # GUI interface (temporarily disabled for cleanup)
+    # GUI interface (temporarily disabled for Phase 2 testing)
     # src/gui/MainInterface.cpp
     
     # New capture implementation
     src/capture/ScreenCaptureLiteDevice.cpp
+    src/capture/CenterRegionCapture.cpp
 )
 
 # Include directories for the library

@@ -2,6 +2,7 @@
 
 #include "../interfaces/ICaptureDevice.h"
 #include "../interfaces/IPerformanceObserver.h"
+#include "CenterRegionCapture.h"
 #include <memory>
 #include <chrono>
 #include <atomic>
@@ -50,6 +51,41 @@ public:
      */
     void UnregisterPerformanceObserver(std::shared_ptr<IPerformanceObserver> observer);
 
+    /**
+     * @brief 320x320 중심 영역 캡처 모드 활성화/비활성화
+     * @param enabled 활성화 여부
+     */
+    void SetCenterRegionMode(bool enabled);
+
+    /**
+     * @brief 320x320 중심 영역 캡처 모드 상태 조회
+     * @return 활성화 여부
+     */
+    bool IsCenterRegionModeEnabled() const;
+
+    /**
+     * @brief 최신 320x320 중심 영역 프레임 획득
+     * @param output_region 320x320 중심 영역 (출력)
+     * @return 프레임 획득 성공 여부
+     */
+    bool GetCenterRegion(cv::Mat& output_region);
+
+    /**
+     * @brief 320x320 좌표를 전체 화면 좌표로 변환
+     * @param region_x 320x320 영역 내 X 좌표
+     * @param region_y 320x320 영역 내 Y 좌표
+     * @param screen_x 전체 화면 X 좌표 (출력)
+     * @param screen_y 전체 화면 Y 좌표 (출력)
+     * @return 변환 성공 여부
+     */
+    bool TransformCenterRegionToScreen(int region_x, int region_y, int& screen_x, int& screen_y);
+
+    /**
+     * @brief 중심 영역 캡처 성능 메트릭 조회
+     * @return 성능 메트릭 문자열
+     */
+    std::string GetCenterRegionPerformanceStats() const;
+
 private:
     // screen_capture_lite 관련
     std::shared_ptr<SL::Screen_Capture::IScreenCaptureManager> capture_manager_;
@@ -77,6 +113,12 @@ private:
     // 성능 관찰자들
     std::vector<std::weak_ptr<IPerformanceObserver>> performance_observers_;
     mutable std::mutex observers_mutex_;
+
+    // 320x320 중심 영역 캡처 최적화
+    std::unique_ptr<CenterRegionCapture> center_region_capture_;
+    cv::Mat latest_center_region_;          ///< 최신 320x320 중심 영역
+    std::mutex center_region_mutex_;        ///< 중심 영역 접근 동기화
+    std::atomic<bool> center_region_enabled_;  ///< 중심 영역 모드 활성화 여부
 
     /**
      * @brief screen_capture_lite 모니터를 MonitorInfo로 변환
@@ -121,4 +163,10 @@ private:
      * @brief 모니터 목록 새로고침
      */
     void RefreshMonitorList();
+
+    /**
+     * @brief 320x320 중심 영역 처리
+     * @param full_frame 전체 화면 프레임
+     */
+    void ProcessCenterRegion(const cv::Mat& full_frame);
 };

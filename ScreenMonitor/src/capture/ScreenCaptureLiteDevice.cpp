@@ -5,11 +5,16 @@
 #include <opencv2/imgproc.hpp>
 #include <nlohmann/json.hpp>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 
 ScreenCaptureLiteDevice::ScreenCaptureLiteDevice() 
     : is_capturing_(false), current_monitor_index_(-1), is_initialized_(false),
       new_frame_available_(false), total_frames_captured_(0), dropped_frames_(0),
-      average_fps_(0.0), average_frame_time_ms_(0.0) {}
+      average_fps_(0.0), average_frame_time_ms_(0.0), center_region_enabled_(true) {
+    // 320x320 중심 영역 캡처 초기화
+    center_region_capture_ = std::make_unique<CenterRegionCapture>();
+}
 
 ScreenCaptureLiteDevice::~ScreenCaptureLiteDevice() {
     Cleanup();
@@ -210,9 +215,17 @@ void ScreenCaptureLiteDevice::OnFrameChanged(const SL::Screen_Capture::Image& im
         cv::Mat converted_frame = ConvertToMat(image);
         
         if (!converted_frame.empty()) {
-            std::lock_guard<std::mutex> lock(frame_mutex_);
-            converted_frame.copyTo(latest_frame_);
-            new_frame_available_ = true;
+            // 전체 프레임 저장 (기존 기능 유지)
+            {
+                std::lock_guard<std::mutex> lock(frame_mutex_);
+                converted_frame.copyTo(latest_frame_);
+                new_frame_available_ = true;
+            }
+            
+            // 320x320 중심 영역 처리 (새로운 기능)
+            if (center_region_enabled_.load()) {
+                ProcessCenterRegion(converted_frame);
+            }
             
             // 프레임 카운터 증가 및 성능 메트릭 업데이트
             total_frames_captured_++;
@@ -372,5 +385,96 @@ void ScreenCaptureLiteDevice::RefreshMonitorList() {
         
     } catch (const std::exception& e) {
         std::cerr << "[ScreenCapture] 모니터 목록 새로고침 중 오류: " << e.what() << std::endl;
+    }
+}
+
+// 320x320 중심 영역 캡처 관련 메서드 구현
+
+void ScreenCaptureLiteDevice::SetCenterRegionMode(bool enabled) {
+    bool previous_state = center_region_enabled_.exchange(enabled);
+    if (previous_state != enabled) {
+        std::cout << "[ScreenCapture] 320x320 center region mode: " 
+                  << (enabled ? "enabled" : "disabled") << std::endl;
+        
+        if (enabled && is_capturing_.load()) {
+            // Optimize memory allocation for current resolution
+            auto monitors = GetAvailableMonitors();
+            if (!monitors.empty() && current_monitor_index_.load() >= 0 && 
+                current_monitor_index_.load() < static_cast<int>(monitors.size())) {
+                auto& current_monitor = monitors[current_monitor_index_.load()];
+                center_region_capture_->OptimizeMemoryAllocation(current_monitor.width, current_monitor.height);
+            }
+        }
+    }
+}
+
+bool ScreenCaptureLiteDevice::IsCenterRegionModeEnabled() const {
+    return center_region_enabled_.load();
+}
+
+bool ScreenCaptureLiteDevice::GetCenterRegion(cv::Mat& output_region) {
+    if (!center_region_enabled_.load()) {
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(center_region_mutex_);
+    if (latest_center_region_.empty()) {
+        return false;
+    }
+    
+    latest_center_region_.copyTo(output_region);
+    return true;
+}
+
+bool ScreenCaptureLiteDevice::TransformCenterRegionToScreen(int region_x, int region_y, 
+                                                           int& screen_x, int& screen_y) {
+    if (!center_region_enabled_.load() || !center_region_capture_) {
+        return false;
+    }
+    
+    // 현재 모니터 정보 가져오기
+    auto monitors = GetAvailableMonitors();
+    if (monitors.empty() || current_monitor_index_.load() < 0 || 
+        current_monitor_index_.load() >= static_cast<int>(monitors.size())) {
+        return false;
+    }
+    
+    auto& current_monitor = monitors[current_monitor_index_.load()];
+    auto region_info = center_region_capture_->CalculateRegionInfo(current_monitor.width, current_monitor.height);
+    
+    center_region_capture_->TransformToScreenCoordinates(region_x, region_y, region_info, screen_x, screen_y);
+    return true;
+}
+
+std::string ScreenCaptureLiteDevice::GetCenterRegionPerformanceStats() const {
+    if (!center_region_capture_) {
+        return "Center region capture not initialized";
+    }
+    
+    auto metrics = center_region_capture_->GetPerformanceMetrics();
+    
+    std::stringstream ss;
+    ss << "Center Region Performance:\n";
+    ss << "  Total extractions: " << metrics.total_extractions << "\n";
+    ss << "  Average time: " << std::fixed << std::setprecision(3) << metrics.average_time_ms << " ms\n";
+    ss << "  Total time: " << std::fixed << std::setprecision(3) << metrics.extraction_time_ms << " ms\n";
+    ss << "  Memory usage: " << (metrics.memory_usage_bytes / 1024) << " KB\n";
+    
+    return ss.str();
+}
+
+void ScreenCaptureLiteDevice::ProcessCenterRegion(const cv::Mat& full_frame) {
+    if (!center_region_capture_ || full_frame.empty()) {
+        return;
+    }
+    
+    try {
+        cv::Mat center_region;
+        if (center_region_capture_->ExtractCenterRegion(full_frame, center_region)) {
+            std::lock_guard<std::mutex> lock(center_region_mutex_);
+            center_region.copyTo(latest_center_region_);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[ScreenCapture] Error during center region processing: " << e.what() << std::endl;
     }
 }
