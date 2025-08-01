@@ -1,7 +1,15 @@
 #include "GLTestContext.h"
 #include <iostream>
 #include <string>
-#include <GL/gl.h>
+#include <vector>
+
+// Use GLFW's OpenGL loading which is more reliable
+// This includes OpenGL functions through GLFW
+
+// GL constants definition if not available
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
 
 bool GLTestContext::s_glfw_initialized = false;
 int GLTestContext::s_instance_count = 0;
@@ -32,7 +40,7 @@ bool GLTestContext::Initialize(bool headless) {
         return false;
     }
     
-    if (!CreateWindow()) {
+    if (!CreateGLFWWindow()) {
         return false;
     }
     
@@ -138,7 +146,7 @@ unsigned int GLTestContext::CreateTestTexture(int width, int height, unsigned in
     
     // 빈 텍스처 생성
     std::vector<unsigned char> data(width * height * 3, 128); // 회색으로 초기화
-    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, format, GL_UNSIGNED_BYTE, data.data());
     
     glBindTexture(GL_TEXTURE_2D, 0);
     return texture_id;
@@ -181,7 +189,7 @@ bool GLTestContext::InitializeGLFW() {
     return true;
 }
 
-bool GLTestContext::CreateWindow() {
+bool GLTestContext::CreateGLFWWindow() {
     // OpenGL 3.3 Core Profile 설정
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);

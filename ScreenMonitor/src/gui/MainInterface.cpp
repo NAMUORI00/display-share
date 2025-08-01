@@ -56,8 +56,18 @@ MainInterface::~MainInterface() {
     Cleanup();
 }
 
+#include "core/ConfigManager.h"
+
 bool MainInterface::Initialize() {
 #if GUI_ENABLED
+    // 설정 파일 로드
+    if (m_configManager.loadConfig(m_configFilePath)) {
+        std::cout << "Configuration loaded from " << m_configFilePath << std::endl;
+        ApplyConfiguration();
+    } else {
+        std::cerr << "Failed to load configuration, using defaults." << std::endl;
+    }
+
     std::cout << "Initializing GUI with GLFW + OpenGL3..." << std::endl;
     
     // GLFW 에러 콜백 설정
@@ -220,8 +230,9 @@ void MainInterface::Render() {
 
     // 도킹 스페이스 생성
     ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-    if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
-        // 처음 실행 시 도킹 레이아웃 설정
+    if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr || m_resetLayout) {
+        m_resetLayout = false;
+        // 처음 실행 또는 레이아웃 리셋 시 도킹 레이아웃 설정
         ImGui::DockBuilderRemoveNode(dockspace_id);
         ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
@@ -254,6 +265,9 @@ void MainInterface::Render() {
     
     // 콘솔 패널
     RenderConsolePanel();
+    
+    // About 다이얼로그
+    RenderAboutDialog();
     
     // 상태바
     RenderStatusBar();
@@ -432,9 +446,55 @@ void MainInterface::RenderFrame() {
         ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(m_frameTexture)), 
                      ImVec2(display_w, display_h));
         
-        // 검출 결과 오버레이 (TODO: 구현)
+        // 검출 결과 오버레이 구현
         if (!m_detections.empty()) {
-            ImGui::Text("Detections: %zu objects", m_detections.size());
+            // 이미지 위에 검출 박스 그리기
+            ImVec2 canvas_pos = ImGui::GetItemRectMin();
+            ImVec2 canvas_size = ImGui::GetItemRectSize();
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            
+            // 검출 결과를 화면 좌표로 변환하여 오버레이
+            float scale_x = display_w / static_cast<float>(m_textureWidth);
+            float scale_y = display_h / static_cast<float>(m_textureHeight);
+            
+            for (size_t i = 0; i < m_detections.size(); ++i) {
+                const auto& detection = m_detections[i];
+                
+                // 검출 박스 좌표 변환
+                float box_x = cursor_pos.x + detection.x * scale_x;
+                float box_y = cursor_pos.y + detection.y * scale_y;
+                float box_w = detection.width * scale_x;
+                float box_h = detection.height * scale_y;
+                
+                // 검출 박스 그리기 (초록색)
+                ImU32 box_color = IM_COL32(0, 255, 0, 255);
+                ImU32 text_color = IM_COL32(255, 255, 255, 255);
+                
+                draw_list->AddRect(
+                    ImVec2(box_x, box_y),
+                    ImVec2(box_x + box_w, box_y + box_h),
+                    box_color, 0.0f, 0, 2.0f
+                );
+                
+                // 검출 인덱스 표시
+                char label[32];
+                snprintf(label, sizeof(label), "Object %zu", i + 1);
+                draw_list->AddText(
+                    ImVec2(box_x, box_y - 20),
+                    text_color,
+                    label
+                );
+            }
+            
+            // 하단에 검출 통계 표시
+            ImGui::Separator();
+            ImGui::Text("Detections: %zu objects found", m_detections.size());
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text("Real-time object detection results");
+                ImGui::Text("Green boxes indicate detected objects");
+                ImGui::EndTooltip();
+            }
         }
     } else {
         ImGui::Text("No video feed available");
@@ -451,11 +511,11 @@ void MainInterface::RenderMenuBar() {
 #if GUI_ENABLED
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Save Config")) {
-                // TODO: 설정 저장
+            if (ImGui::MenuItem("Save Config", "Ctrl+S")) {
+                SaveConfiguration();
             }
-            if (ImGui::MenuItem("Load Config")) {
-                // TODO: 설정 로드
+            if (ImGui::MenuItem("Load Config", "Ctrl+O")) {
+                LoadConfiguration();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
@@ -466,14 +526,14 @@ void MainInterface::RenderMenuBar() {
         
         if (ImGui::BeginMenu("View")) {
             if (ImGui::MenuItem("Reset Layout")) {
-                // TODO: 레이아웃 리셋
+                m_resetLayout = true;
             }
             ImGui::EndMenu();
         }
         
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About")) {
-                // TODO: About 다이얼로그
+                m_showAboutDialog = true;
             }
             ImGui::EndMenu();
         }
@@ -524,7 +584,12 @@ void MainInterface::RenderCapturePanel() {
     
     // FPS 설정
     ImGui::Text("Target FPS:");
-    ImGui::SliderFloat("##target_fps", &m_targetFPS, 1.0f, 120.0f, "%.1f");
+    if (ImGui::SliderFloat("##target_fps", &m_targetFPS, 1.0f, 120.0f, "%.1f")) {
+        // 실시간 설정 저장
+        m_configManager.setValue("/performance/target_fps", m_targetFPS);
+        AutoSaveConfiguration();
+        AddLogMessage("Target FPS updated to " + std::to_string(m_targetFPS), 0);
+    }
     
     ImGui::Separator();
     
@@ -543,34 +608,70 @@ void MainInterface::RenderDetectionPanel() {
     ImGui::Begin("Detection Settings");
     
     // HSV 검출 설정
-    ImGui::Checkbox("HSV Color Detection", &m_hsvEnabled);
+    if (ImGui::Checkbox("HSV Color Detection", &m_hsvEnabled)) {
+        m_configManager.setValue("/vision_algorithms/hsv_tracking/enabled", m_hsvEnabled);
+        AutoSaveConfiguration();
+        AddLogMessage("HSV detection " + std::string(m_hsvEnabled ? "enabled" : "disabled"), 0);
+    }
+    
     if (m_hsvEnabled) {
         ImGui::Text("HSV Lower Bound:");
-        ImGui::SliderInt3("##hsv_lower", m_hsvLower, 0, 255);
+        if (ImGui::SliderInt3("##hsv_lower", m_hsvLower, 0, 255)) {
+            m_configManager.setValue("/vision_algorithms/hsv_tracking/lower_bound", 
+                                   {m_hsvLower[0], m_hsvLower[1], m_hsvLower[2]});
+            AutoSaveConfiguration();
+            AddLogMessage("HSV lower bound updated", 0);
+        }
+        
         ImGui::Text("HSV Upper Bound:");
-        ImGui::SliderInt3("##hsv_upper", m_hsvUpper, 0, 255);
+        if (ImGui::SliderInt3("##hsv_upper", m_hsvUpper, 0, 255)) {
+            m_configManager.setValue("/vision_algorithms/hsv_tracking/upper_bound", 
+                                   {m_hsvUpper[0], m_hsvUpper[1], m_hsvUpper[2]});
+            AutoSaveConfiguration();
+            AddLogMessage("HSV upper bound updated", 0);
+        }
     }
     
     ImGui::Separator();
     
     // YOLO v11 검출 설정
-    ImGui::Checkbox("YOLO v11 Detection", &m_yolov11Enabled);
+    if (ImGui::Checkbox("YOLO v11 Detection", &m_yolov11Enabled)) {
+        m_configManager.setValue("/vision_algorithms/yolo_detection/enabled", m_yolov11Enabled);
+        AutoSaveConfiguration();
+        AddLogMessage("YOLO v11 detection " + std::string(m_yolov11Enabled ? "enabled" : "disabled"), 0);
+    }
+    
     if (m_yolov11Enabled) {
         ImGui::Text("Model Path:");
-        ImGui::InputText("##yolo_model", m_yolov11ModelPath, sizeof(m_yolov11ModelPath));
+        if (ImGui::InputText("##yolo_model", m_yolov11ModelPath, sizeof(m_yolov11ModelPath))) {
+            m_configManager.setValue("/vision_algorithms/yolo_detection/model_path", std::string(m_yolov11ModelPath));
+            AddLogMessage("YOLO model path updated", 0);
+        }
         
         ImGui::Text("Class Names:");
-        ImGui::InputText("##yolo_classes", m_yolov11ClassNamesPath, sizeof(m_yolov11ClassNamesPath));
+        if (ImGui::InputText("##yolo_classes", m_yolov11ClassNamesPath, sizeof(m_yolov11ClassNamesPath))) {
+            m_configManager.setValue("/vision_algorithms/yolo_detection/config_path", std::string(m_yolov11ClassNamesPath));
+            AddLogMessage("YOLO class names path updated", 0);
+        }
         
         ImGui::Text("Confidence Threshold:");
-        ImGui::SliderFloat("##confidence", &m_yolov11Confidence, 0.1f, 1.0f, "%.2f");
+        if (ImGui::SliderFloat("##confidence", &m_yolov11Confidence, 0.1f, 1.0f, "%.2f")) {
+            m_configManager.setValue("/vision_algorithms/yolo_detection/confidence_threshold", m_yolov11Confidence);
+            AddLogMessage("Confidence threshold updated to " + std::to_string(m_yolov11Confidence), 0);
+        }
         
         ImGui::Text("NMS Threshold:");
-        ImGui::SliderFloat("##nms", &m_yolov11NMS, 0.1f, 1.0f, "%.2f");
+        if (ImGui::SliderFloat("##nms", &m_yolov11NMS, 0.1f, 1.0f, "%.2f")) {
+            m_configManager.setValue("/vision_algorithms/yolo_detection/nms_threshold", m_yolov11NMS);
+            AddLogMessage("NMS threshold updated to " + std::to_string(m_yolov11NMS), 0);
+        }
         
         ImGui::Text("Backend:");
         const char* backends[] = {"OpenCV DNN", "ONNX Runtime GPU"};
-        ImGui::Combo("##backend", &m_yolov11Backend, backends, 2);
+        if (ImGui::Combo("##backend", &m_yolov11Backend, backends, 2)) {
+            m_configManager.setValue("/vision_algorithms/yolo_detection/backend", m_yolov11Backend);
+            AddLogMessage("Backend changed to " + std::string(backends[m_yolov11Backend]), 0);
+        }
     }
     
     ImGui::Separator();
@@ -733,6 +834,157 @@ void MainInterface::RenderConsolePanel() {
             }
         }
         ImGui::EndChild();
+    }
+    ImGui::End();
+#endif
+}
+
+void MainInterface::SaveConfiguration() {
+    UpdateConfigurationFromGui();
+    if (m_configManager.saveConfig()) {
+        AddLogMessage("Configuration saved successfully.", 0);
+    } else {
+        AddLogMessage("Error: Failed to save configuration.", 2);
+    }
+}
+
+void MainInterface::AutoSaveConfiguration() {
+    // 자동 저장 (오류 발생 시 로깅만 하고 계속 진행)
+    try {
+        if (m_configManager.saveConfig()) {
+            // 성공적인 자동 저장은 로그에 표시하지 않음 (너무 많은 로그 방지)
+        } else {
+            AddLogMessage("Warning: Auto-save failed", 1);
+        }
+    } catch (const std::exception& e) {
+        AddLogMessage("Warning: Auto-save exception - " + std::string(e.what()), 1);
+    }
+}
+
+void MainInterface::LoadConfiguration() {
+    if (m_configManager.loadConfig(m_configFilePath)) {
+        ApplyConfiguration();
+        AddLogMessage("Configuration loaded successfully.", 0);
+    } else {
+        AddLogMessage("Error: Failed to load configuration.", 2);
+    }
+}
+
+void MainInterface::ApplyConfiguration() {
+    m_targetFPS = m_configManager.getValue<float>("/performance/target_fps", 60.0f);
+    
+    // HSV 설정
+    m_hsvEnabled = m_configManager.getValue<bool>("/vision_algorithms/hsv_tracking/enabled", true);
+    auto hsv_lower = m_configManager.getValue<std::vector<int>>("/vision_algorithms/hsv_tracking/lower_bound", {100, 50, 50});
+    auto hsv_upper = m_configManager.getValue<std::vector<int>>("/vision_algorithms/hsv_tracking/upper_bound", {130, 255, 255});
+    if(hsv_lower.size() == 3) std::copy(hsv_lower.begin(), hsv_lower.end(), m_hsvLower);
+    if(hsv_upper.size() == 3) std::copy(hsv_upper.begin(), hsv_upper.end(), m_hsvUpper);
+
+    // YOLO v11 설정
+    m_yolov11Enabled = m_configManager.getValue<bool>("/vision_algorithms/yolo_detection/enabled", false);
+    std::string model_path = m_configManager.getValue<std::string>("/vision_algorithms/yolo_detection/model_path", "models/yolo11n.onnx");
+    std::string class_path = m_configManager.getValue<std::string>("/vision_algorithms/yolo_detection/config_path", "models/coco.names");
+    strncpy(m_yolov11ModelPath, model_path.c_str(), sizeof(m_yolov11ModelPath) - 1);
+    strncpy(m_yolov11ClassNamesPath, class_path.c_str(), sizeof(m_yolov11ClassNamesPath) - 1);
+    m_yolov11Confidence = m_configManager.getValue<float>("/vision_algorithms/yolo_detection/confidence_threshold", 0.5f);
+    m_yolov11NMS = m_configManager.getValue<float>("/vision_algorithms/yolo_detection/nms_threshold", 0.4f);
+}
+
+void MainInterface::UpdateConfigurationFromGui() {
+    m_configManager.setValue("/performance/target_fps", m_targetFPS);
+
+    // HSV 설정
+    m_configManager.setValue("/vision_algorithms/hsv_tracking/enabled", m_hsvEnabled);
+    m_configManager.setValue("/vision_algorithms/hsv_tracking/lower_bound", {m_hsvLower[0], m_hsvLower[1], m_hsvLower[2]});
+    m_configManager.setValue("/vision_algorithms/hsv_tracking/upper_bound", {m_hsvUpper[0], m_hsvUpper[1], m_hsvUpper[2]});
+
+    // YOLO v11 설정
+    m_configManager.setValue("/vision_algorithms/yolo_detection/enabled", m_yolov11Enabled);
+    m_configManager.setValue("/vision_algorithms/yolo_detection/model_path", std::string(m_yolov11ModelPath));
+    m_configManager.setValue("/vision_algorithms/yolo_detection/config_path", std::string(m_yolov11ClassNamesPath));
+    m_configManager.setValue("/vision_algorithms/yolo_detection/confidence_threshold", m_yolov11Confidence);
+    m_configManager.setValue("/vision_algorithms/yolo_detection/nms_threshold", m_yolov11NMS);
+}
+
+void MainInterface::RenderAboutDialog() {
+#if GUI_ENABLED
+    if (!m_showAboutDialog) return;
+    
+    // About 다이얼로그 창 설정
+    ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+    
+    if (ImGui::Begin("About Professional Screen Capture & Computer Vision System", &m_showAboutDialog, 
+                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
+        
+        // 제품 로고 및 제목
+        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // 기본 폰트 사용
+        ImGui::Text("🎯 Professional Screen Capture & Computer Vision System");
+        ImGui::PopFont();
+        
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // 버전 정보
+        ImGui::Text("Version: 1.0.0");
+        ImGui::Text("Build Date: %s %s", __DATE__, __TIME__);
+        ImGui::Text("GUI Framework: ImGui + GLFW + OpenGL3");
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // 주요 특징
+        ImGui::Text("🚀 Key Features:");
+        ImGui::BulletText("Real-time screen capture (60-120 FPS)");
+        ImGui::BulletText("Advanced computer vision algorithms");
+        ImGui::BulletText("HSV color detection & tracking");
+        ImGui::BulletText("YOLO v11 object detection with TensorRT");
+        ImGui::BulletText("Professional GUI with docking support");
+        ImGui::BulletText("Cross-platform compatibility");
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // 기술 스택
+        ImGui::Text("🔧 Technology Stack:");
+        ImGui::BulletText("C++17 with modern design patterns");
+        ImGui::BulletText("OpenCV 4.x for computer vision");
+        ImGui::BulletText("screen_capture_lite for high-performance capture");
+        ImGui::BulletText("TensorRT for AI inference acceleration");
+        ImGui::BulletText("JSON configuration management");
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // 시스템 정보
+        ImGui::Text("💻 System Information:");
+        ImGui::BulletText("OpenGL Version: %s", glGetString(GL_VERSION));
+        ImGui::BulletText("OpenGL Vendor: %s", glGetString(GL_VENDOR));
+        ImGui::BulletText("OpenGL Renderer: %s", glGetString(GL_RENDERER));
+        
+        auto& io = ImGui::GetIO();
+        ImGui::BulletText("Display Size: %.0fx%.0f", io.DisplaySize.x, io.DisplaySize.y);
+        ImGui::BulletText("Frame Rate: %.1f FPS", io.Framerate);
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // 라이선스 및 저작권
+        ImGui::Text("📄 License & Copyright:");
+        ImGui::TextWrapped("This software is designed for professional computer vision applications. "
+                          "Built with open-source libraries including OpenCV, ImGui, GLFW, and nlohmann::json.");
+        
+        ImGui::Spacing();
+        
+        // 닫기 버튼
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 120) * 0.5f);
+        if (ImGui::Button("Close", ImVec2(120, 30))) {
+            m_showAboutDialog = false;
+        }
     }
     ImGui::End();
 #endif

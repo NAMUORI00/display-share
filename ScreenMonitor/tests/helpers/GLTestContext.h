@@ -2,6 +2,8 @@
 
 #include <GLFW/glfw3.h>
 #include <memory>
+#include <string>
+#include <utility>
 
 /**
  * @brief 테스트용 OpenGL 컨텍스트 헬퍼 클래스
@@ -146,6 +148,6 @@ private:
     
     // 내부 헬퍼 함수들
     bool InitializeGLFW();
-    bool CreateWindow();
+    bool CreateGLFWWindow();
     bool InitializeGL();
 };

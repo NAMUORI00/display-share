@@ -8,11 +8,11 @@ std::vector<std::string> ConfigTestHelper::temp_files_;
 
 json ConfigTestHelper::createDefaultTestConfig() {
     return json{
-        {"educational_framework", {
-            {"name", "Educational Computer Vision Framework"},
+        {"production_system", {
+            {"name", "Professional Screen Capture & Computer Vision System"},
             {"version", "1.0.0"},
-            {"purpose", "Learning computer vision and tracking algorithms"},
-            {"mode", "educational_only"}
+            {"purpose", "High-performance real-time screen capture and computer vision processing"},
+            {"mode", "production_mode"}
         }},
         {"vision_algorithms", {
             {"selected_algorithm", "hsv"},

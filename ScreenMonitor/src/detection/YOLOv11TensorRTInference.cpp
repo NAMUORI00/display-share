@@ -833,9 +833,15 @@ std::vector<IDetectionAlgorithm::DetectionResult> YOLOv11TensorRTInference::Appl
 
 void YOLOv11TensorRTInference::UpdatePerformanceMetrics(double inference_time) const {
     uint64_t current_inferences = total_inferences_.fetch_add(1) + 1;
-    double current_total = total_inference_time_ms_.fetch_add(inference_time) + inference_time;
-    double new_average = current_total / current_inferences;
     
+    // Atomic addition for double using compare-and-swap
+    double expected_total = total_inference_time_ms_.load();
+    double desired_total;
+    do {
+        desired_total = expected_total + inference_time;
+    } while (!total_inference_time_ms_.compare_exchange_weak(expected_total, desired_total));
+    
+    double new_average = desired_total / current_inferences;
     average_inference_time_ms_.store(new_average);
     last_inference_time_ = std::chrono::high_resolution_clock::now();
 }

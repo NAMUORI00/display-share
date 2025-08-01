@@ -19,6 +19,7 @@ public:
         double processing_time_ms = 0.0;
         size_t memory_usage_mb = 0;
         int dropped_frames = 0;
+        size_t total_frames = 0;
         std::chrono::steady_clock::time_point timestamp;
         
         PerformanceMetrics() {
