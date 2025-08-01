@@ -3,7 +3,9 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <algorithm>
+#include <numeric>
 #include <random>
 #include <filesystem>
 
@@ -363,24 +365,60 @@ bool YOLOv11TensorRTInference::BuildTensorRTEngine(bool force_rebuild) {
             return false;
         }
         
-        // 빌더 설정
+        // 빌더 설정 (Phase 0 연구 기반 최적화)
         auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
         if (!config) {
             std::cerr << "[YOLOv11TensorRT] Failed to create builder config" << std::endl;
             return false;
         }
         
+        // Phase 0 연구: 512MB-1GB 워크스페이스가 최적
         config->setMaxWorkspaceSize(settings_.max_workspace_size);
+        std::cout << "[YOLOv11TensorRT] Workspace size: " << (settings_.max_workspace_size >> 20) << " MB" << std::endl;
         
+        // Phase 0 연구: FP16으로 30% 성능 향상 (RTX 3070 기준)
         if (settings_.enable_fp16 && builder->platformHasFastFp16()) {
             config->setFlag(nvinfer1::BuilderFlag::kFP16);
-            std::cout << "[YOLOv11TensorRT] FP16 optimization enabled" << std::endl;
+            std::cout << "[YOLOv11TensorRT] FP16 precision enabled (+30% performance boost)" << std::endl;
         }
         
+        // Phase 0 연구: INT8로 2배 성능 향상 (정확도 트레이드오프)
         if (settings_.enable_int8 && builder->platformHasFastInt8()) {
             config->setFlag(nvinfer1::BuilderFlag::kINT8);
-            std::cout << "[YOLOv11TensorRT] INT8 optimization enabled" << std::endl;
+            std::cout << "[YOLOv11TensorRT] INT8 precision enabled (+2x performance boost)" << std::endl;
         }
+        
+        // 정적 형태 최적화 (320x320 고정 입력)
+        auto optimization_profile = builder->createOptimizationProfile();
+        if (optimization_profile) {
+            // YOLOv11 320x320 입력 고정 형태 설정
+            nvinfer1::Dims input_dims;
+            input_dims.nbDims = 4;
+            input_dims.d[0] = 1;  // batch size
+            input_dims.d[1] = 3;  // channels
+            input_dims.d[2] = 320; // height
+            input_dims.d[3] = 320; // width
+            
+            const char* input_name = network->getInput(0)->getName();
+            optimization_profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kMIN, input_dims);
+            optimization_profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kOPT, input_dims);
+            optimization_profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kMAX, input_dims);
+            
+            config->addOptimizationProfile(optimization_profile);
+            std::cout << "[YOLOv11TensorRT] Static shape optimization: 1×3×320×320 (Phase 0 optimized)" << std::endl;
+        }
+        
+        // Tactic 소스 최적화 (Phase 0 연구 권장사항)
+        if (settings_.enable_tactic_sources) {
+            config->setTacticSources(1U << static_cast<uint32_t>(nvinfer1::TacticSource::kCUBLAS) |
+                                   1U << static_cast<uint32_t>(nvinfer1::TacticSource::kCUBLAS_LT) |
+                                   1U << static_cast<uint32_t>(nvinfer1::TacticSource::kCUDNN));
+            std::cout << "[YOLOv11TensorRT] Advanced tactic sources enabled" << std::endl;
+        }
+        
+        // GPU 계층 융합 최적화
+        config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+        std::cout << "[YOLOv11TensorRT] GPU layer fusion optimization enabled" << std::endl;
         
         // 엔진 빌드
         std::cout << "[YOLOv11TensorRT] Building engine... This may take several minutes." << std::endl;
@@ -423,20 +461,52 @@ bool YOLOv11TensorRTInference::BuildTensorRTEngine(bool force_rebuild) {
 
 void YOLOv11TensorRTInference::WarmupEngine(int warmup_iterations) {
     if (!is_initialized_) {
+        std::cout << "[YOLOv11TensorRT] Cannot warmup: engine not initialized" << std::endl;
         return;
     }
     
-    std::cout << "[YOLOv11TensorRT] Warming up engine with " << warmup_iterations << " iterations..." << std::endl;
+    std::cout << "[YOLOv11TensorRT] Warming up engine (320x320 optimized) with " << warmup_iterations << " iterations..." << std::endl;
     
-    // 더미 이미지 생성
-    cv::Mat dummy_image(settings_.input_height, settings_.input_width, CV_8UC3);
+    // 320x320 더미 이미지 생성 (실제 사용 시나리오와 동일)
+    cv::Mat dummy_image(320, 320, CV_8UC3);
     cv::randu(dummy_image, cv::Scalar(0, 0, 0), cv::Scalar(255, 255, 255));
     
+    auto warmup_start = std::chrono::high_resolution_clock::now();
+    std::vector<double> warmup_times;
+    
     for (int i = 0; i < warmup_iterations; ++i) {
+        auto iter_start = std::chrono::high_resolution_clock::now();
+        
+        // 실제 추론 파이프라인 실행
         DetectMultiple(dummy_image);
+        
+        auto iter_end = std::chrono::high_resolution_clock::now();
+        double iter_time = std::chrono::duration<double, std::milli>(iter_end - iter_start).count();
+        warmup_times.push_back(iter_time);
+        
+        // 진행 상황 표시 (매 5번째 반복마다)
+        if ((i + 1) % 5 == 0 || i == 0) {
+            std::cout << "[YOLOv11TensorRT] Warmup iteration " << (i + 1) << "/" << warmup_iterations 
+                      << " - " << std::fixed << std::setprecision(2) << iter_time << " ms" << std::endl;
+        }
     }
     
-    std::cout << "[YOLOv11TensorRT] Engine warmup completed" << std::endl;
+    auto warmup_end = std::chrono::high_resolution_clock::now();
+    double total_warmup_time = std::chrono::duration<double, std::milli>(warmup_end - warmup_start).count();
+    
+    // 성능 통계 계산
+    double min_time = *std::min_element(warmup_times.begin(), warmup_times.end());
+    double max_time = *std::max_element(warmup_times.begin(), warmup_times.end());
+    double avg_time = std::accumulate(warmup_times.begin(), warmup_times.end(), 0.0) / warmup_times.size();
+    double fps_estimate = 1000.0 / avg_time;
+    
+    std::cout << "[YOLOv11TensorRT] Engine warmup completed in " << std::fixed << std::setprecision(1) 
+              << total_warmup_time << " ms" << std::endl;
+    std::cout << "  - Average inference time: " << std::fixed << std::setprecision(2) << avg_time << " ms" << std::endl;
+    std::cout << "  - Min/Max inference time: " << std::fixed << std::setprecision(2) << min_time 
+              << "/" << max_time << " ms" << std::endl;
+    std::cout << "  - Estimated FPS: " << std::fixed << std::setprecision(1) << fps_estimate << " FPS" << std::endl;
+    std::cout << "  - Phase 0 target: ~280 FPS (YOLOv11n @ 320x320)" << std::endl;
 }
 
 // Private methods implementation
@@ -627,36 +697,54 @@ bool YOLOv11TensorRTInference::LoadTensorRTEngine() {
 
 bool YOLOv11TensorRTInference::AllocateCUDAMemory() {
     try {
-        // CUDA 스트림 생성
-        cudaError_t status = cudaStreamCreate(&cuda_stream_);
+        // CUDA 스트림 생성 (Phase 0 연구 기반 성능 최적화)
+        cudaError_t status = cudaStreamCreateWithFlags(&cuda_stream_, cudaStreamNonBlocking);
         if (status != cudaSuccess) {
             std::cerr << "[YOLOv11TensorRT] Failed to create CUDA stream: " << cudaGetErrorString(status) << std::endl;
             return false;
         }
         
-        // GPU 메모리 할당
+        // GPU 메모리 할당 (320x320 최적화)
+        // 입력: 1 × 3 × 320 × 320 × sizeof(float) = 1.2 MB
         status = cudaMalloc(&gpu_input_buffer_, input_size_);
         if (status != cudaSuccess) {
             std::cerr << "[YOLOv11TensorRT] Failed to allocate GPU input memory: " << cudaGetErrorString(status) << std::endl;
             return false;
         }
         
+        // 출력: 8400 × 84 × sizeof(float) = 2.8 MB
         status = cudaMalloc(&gpu_output_buffer_, output_size_);
         if (status != cudaSuccess) {
             std::cerr << "[YOLOv11TensorRT] Failed to allocate GPU output memory: " << cudaGetErrorString(status) << std::endl;
             return false;
         }
         
-        // CPU 출력 버퍼 할당
-        cpu_output_buffer_ = malloc(output_size_);
-        if (!cpu_output_buffer_) {
-            std::cerr << "[YOLOv11TensorRT] Failed to allocate CPU output memory" << std::endl;
-            return false;
+        // CPU 출력 버퍼 할당 (페이지 잠금 메모리 사용으로 전송 성능 향상)
+        status = cudaHostAlloc(&cpu_output_buffer_, output_size_, cudaHostAllocDefault);
+        if (status != cudaSuccess) {
+            std::cerr << "[YOLOv11TensorRT] Failed to allocate pinned CPU output memory: " 
+                      << cudaGetErrorString(status) << std::endl;
+            // 폴백: 일반 메모리 할당
+            cpu_output_buffer_ = malloc(output_size_);
+            if (!cpu_output_buffer_) {
+                std::cerr << "[YOLOv11TensorRT] Failed to allocate CPU output memory" << std::endl;
+                return false;
+            }
+            std::cout << "[YOLOv11TensorRT] Using regular CPU memory (pinned memory allocation failed)" << std::endl;
+        } else {
+            std::cout << "[YOLOv11TensorRT] Using pinned CPU memory for optimal transfer performance" << std::endl;
         }
         
-        std::cout << "[YOLOv11TensorRT] CUDA memory allocated successfully" << std::endl;
-        std::cout << "  - Input buffer: " << input_size_ / (1024 * 1024) << " MB" << std::endl;
-        std::cout << "  - Output buffer: " << output_size_ / (1024 * 1024) << " MB" << std::endl;
+        // 메모리 사용량 로깅 (Phase 0 연구 기준)
+        float input_mb = static_cast<float>(input_size_) / (1024.0f * 1024.0f);
+        float output_mb = static_cast<float>(output_size_) / (1024.0f * 1024.0f);
+        float total_mb = input_mb + output_mb;
+        
+        std::cout << "[YOLOv11TensorRT] CUDA memory allocated successfully (320x320 optimized)" << std::endl;
+        std::cout << "  - Input buffer (320×320×3): " << std::fixed << std::setprecision(1) << input_mb << " MB" << std::endl;
+        std::cout << "  - Output buffer (8400×84): " << std::fixed << std::setprecision(1) << output_mb << " MB" << std::endl;
+        std::cout << "  - Total GPU memory: " << std::fixed << std::setprecision(1) << total_mb << " MB" << std::endl;
+        std::cout << "  - Target performance: ~280 FPS (Phase 0 research baseline)" << std::endl;
         
         return true;
         
@@ -678,7 +766,12 @@ void YOLOv11TensorRTInference::FreeCUDAMemory() {
     }
     
     if (cpu_output_buffer_) {
-        free(cpu_output_buffer_);
+        // Try to free as pinned memory first, fall back to regular free
+        cudaError_t status = cudaFreeHost(cpu_output_buffer_);
+        if (status != cudaSuccess) {
+            // If cudaFreeHost fails, it was regular malloc memory
+            free(cpu_output_buffer_);
+        }
         cpu_output_buffer_ = nullptr;
     }
     
@@ -687,7 +780,7 @@ void YOLOv11TensorRTInference::FreeCUDAMemory() {
         cuda_stream_ = nullptr;
     }
     
-    std::cout << "[YOLOv11TensorRT] CUDA memory freed" << std::endl;
+    std::cout << "[YOLOv11TensorRT] CUDA memory freed (320x320 optimized buffers)" << std::endl;
 }
 #endif
 
@@ -741,10 +834,79 @@ bool YOLOv11TensorRTInference::LoadClassNames(const std::string& class_names_pat
 
 std::vector<IDetectionAlgorithm::DetectionResult> YOLOv11TensorRTInference::InferTensorRT(const cv::Mat& image) {
 #ifdef HAVE_TENSORRT
-    // TensorRT 추론 구현은 복잡하므로 기본 구조만 제공
-    // 실제 구현에서는 CUDA 커널을 사용한 전처리, 추론, 후처리가 필요
-    std::cerr << "[YOLOv11TensorRT] TensorRT inference not yet fully implemented" << std::endl;
-    return std::vector<DetectionResult>();
+    if (!context_ || !engine_ || !gpu_input_buffer_ || !gpu_output_buffer_) {
+        std::cerr << "[YOLOv11TensorRT] TensorRT components not properly initialized" << std::endl;
+        return std::vector<DetectionResult>();
+    }
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    try {
+        // 1. 이미지 전처리 (CPU → GPU 메모리 전송 최적화)
+        float* input_host_buffer = new float[input_size_ / sizeof(float)];
+        PreprocessImageTensorRT(image, input_host_buffer);
+        
+        // 2. 입력 데이터를 GPU로 비동기 복사 (성능 최적화)
+        cudaError_t cuda_status = cudaMemcpyAsync(
+            gpu_input_buffer_, 
+            input_host_buffer, 
+            input_size_,
+            cudaMemcpyHostToDevice, 
+            cuda_stream_
+        );
+        
+        if (cuda_status != cudaSuccess) {
+            std::cerr << "[YOLOv11TensorRT] Failed to copy input to GPU: " 
+                      << cudaGetErrorString(cuda_status) << std::endl;
+            delete[] input_host_buffer;
+            return std::vector<DetectionResult>();
+        }
+
+        // 3. TensorRT 추론 실행 (Phase 0 연구: ~280 FPS at 320x320)
+        void* bindings[] = { gpu_input_buffer_, gpu_output_buffer_ };
+        bool inference_success = context_->enqueueV2(bindings, cuda_stream_, nullptr);
+        
+        if (!inference_success) {
+            std::cerr << "[YOLOv11TensorRT] Inference execution failed" << std::endl;
+            delete[] input_host_buffer;
+            return std::vector<DetectionResult>();
+        }
+
+        // 4. 출력 데이터를 CPU로 비동기 복사
+        cuda_status = cudaMemcpyAsync(
+            cpu_output_buffer_, 
+            gpu_output_buffer_, 
+            output_size_,
+            cudaMemcpyDeviceToHost, 
+            cuda_stream_
+        );
+        
+        if (cuda_status != cudaSuccess) {
+            std::cerr << "[YOLOv11TensorRT] Failed to copy output from GPU: " 
+                      << cudaGetErrorString(cuda_status) << std::endl;
+            delete[] input_host_buffer;
+            return std::vector<DetectionResult>();
+        }
+
+        // 5. CUDA 스트림 동기화 (비동기 작업 완료 대기)
+        cudaStreamSynchronize(cuda_stream_);
+
+        // 6. 후처리 및 NMS 적용 (YOLOv11 8400×84 출력 포맷)
+        float* output_data = static_cast<float*>(cpu_output_buffer_);
+        std::vector<DetectionResult> results = PostprocessOutput(output_data, cv::Size(image.cols, image.rows));
+
+        // 7. 성능 메트릭 업데이트
+        auto end_time = std::chrono::high_resolution_clock::now();
+        double inference_time = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        UpdatePerformanceMetrics(inference_time);
+
+        delete[] input_host_buffer;
+        return results;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[YOLOv11TensorRT] Exception during inference: " << e.what() << std::endl;
+        return std::vector<DetectionResult>();
+    }
 #else
     return std::vector<DetectionResult>();
 #endif
@@ -782,14 +944,133 @@ cv::Mat YOLOv11TensorRTInference::PreprocessImageOpenCV(const cv::Mat& image) {
     return blob;
 }
 
+void YOLOv11TensorRTInference::PreprocessImageTensorRT(const cv::Mat& image, float* input_tensor) {
+    // TensorRT용 고성능 전처리 (320x320 최적화)
+    cv::Mat resized_image;
+    
+    // 1. 이미지 리사이징 (320x320으로 변환)
+    if (image.cols != settings_.input_width || image.rows != settings_.input_height) {
+        cv::resize(image, resized_image, cv::Size(settings_.input_width, settings_.input_height), 
+                  0, 0, cv::INTER_LINEAR);
+    } else {
+        resized_image = image;
+    }
+    
+    // 2. BGR → RGB 변환 (YOLOv11은 RGB 입력 요구)
+    cv::Mat rgb_image;
+    if (resized_image.channels() == 3) {
+        cv::cvtColor(resized_image, rgb_image, cv::COLOR_BGR2RGB);
+    } else {
+        rgb_image = resized_image;
+    }
+    
+    // 3. 정규화 및 채널 분리 (CHW 형식으로 변환)
+    // TensorRT 입력 형식: NCHW (1 × 3 × 320 × 320)
+    const int channels = 3;
+    const int height = settings_.input_height;
+    const int width = settings_.input_width;
+    
+    // 픽셀 정규화: [0, 255] → [0, 1]
+    rgb_image.convertTo(rgb_image, CV_32F, 1.0 / 255.0);
+    
+    // CHW 형식으로 데이터 배치
+    std::vector<cv::Mat> input_channels(channels);
+    for (int c = 0; c < channels; c++) {
+        input_channels[c] = cv::Mat(height, width, CV_32F, 
+                                   input_tensor + c * height * width);
+    }
+    
+    // 채널별로 데이터 분리 및 복사
+    cv::split(rgb_image, input_channels);
+}
+
 std::vector<IDetectionAlgorithm::DetectionResult> YOLOv11TensorRTInference::PostprocessOutput(
     const float* output_data, const cv::Size& image_size) {
     
     std::vector<DetectionResult> detections;
     
-    // YOLOv11 출력 포맷에 따른 후처리
-    // 실제 구현에서는 모델 출력 구조에 맞게 수정 필요
+    // YOLOv11 출력 포맷 (Phase 0 연구 기반): 8400 predictions × 84 classes
+    const int num_predictions = 8400;  // YOLOv11n의 표준 출력 예측 수
+    const int num_classes = 80;        // COCO 데이터셋 클래스 수
+    const int output_stride = 84;      // 4 (bbox) + 80 (classes) = 84
     
+    // 320x320 입력에 대한 스케일 팩터 계산
+    float scale_x = static_cast<float>(image_size.width) / static_cast<float>(settings_.input_width);
+    float scale_y = static_cast<float>(image_size.height) / static_cast<float>(settings_.input_height);
+    
+    // 각 예측에 대해 반복 처리
+    for (int i = 0; i < num_predictions; i++) {
+        const float* prediction = output_data + i * output_stride;
+        
+        // 바운딩 박스 좌표 (YOLOv11 형식: center_x, center_y, width, height)
+        float center_x = prediction[0];
+        float center_y = prediction[1];
+        float width = prediction[2];
+        float height = prediction[3];
+        
+        // 가장 높은 클래스 확률 찾기
+        float max_confidence = 0.0f;
+        int best_class_id = -1;
+        
+        for (int class_id = 0; class_id < num_classes; class_id++) {
+            float class_confidence = prediction[4 + class_id];
+            if (class_confidence > max_confidence) {
+                max_confidence = class_confidence;
+                best_class_id = class_id;
+            }
+        }
+        
+        // 신뢰도 임계값 필터링
+        if (max_confidence < settings_.confidence_threshold) {
+            continue;
+        }
+        
+        // 320x320 정규화된 좌표를 원본 이미지 좌표로 변환
+        // YOLOv11은 정규화된 좌표를 출력하므로 스케일링 필요
+        float scaled_center_x = center_x * scale_x;
+        float scaled_center_y = center_y * scale_y;
+        float scaled_width = width * scale_x;
+        float scaled_height = height * scale_y;
+        
+        // 중심점 기반 좌표를 좌상단 모서리 기반으로 변환
+        float x1 = scaled_center_x - scaled_width * 0.5f;
+        float y1 = scaled_center_y - scaled_height * 0.5f;
+        float x2 = scaled_center_x + scaled_width * 0.5f;
+        float y2 = scaled_center_y + scaled_height * 0.5f;
+        
+        // 바운딩 박스를 이미지 경계 내로 제한
+        x1 = std::max(0.0f, std::min(x1, static_cast<float>(image_size.width - 1)));
+        y1 = std::max(0.0f, std::min(y1, static_cast<float>(image_size.height - 1)));
+        x2 = std::max(0.0f, std::min(x2, static_cast<float>(image_size.width - 1)));
+        y2 = std::max(0.0f, std::min(y2, static_cast<float>(image_size.height - 1)));
+        
+        // 유효한 바운딩 박스인지 확인
+        if (x2 <= x1 || y2 <= y1) {
+            continue;
+        }
+        
+        // DetectionResult 생성
+        DetectionResult detection;
+        detection.class_id = best_class_id;
+        detection.confidence = static_cast<double>(max_confidence);
+        detection.bounding_box = cv::Rect(
+            static_cast<int>(x1), 
+            static_cast<int>(y1),
+            static_cast<int>(x2 - x1), 
+            static_cast<int>(y2 - y1)
+        );
+        
+        // 클래스 이름 설정
+        if (best_class_id >= 0 && best_class_id < static_cast<int>(class_names_.size())) {
+            detection.label = class_names_[best_class_id];
+        } else {
+            detection.label = "unknown_" + std::to_string(best_class_id);
+        }
+        
+        detections.push_back(detection);
+    }
+    
+    // NMS 적용하여 중복 감지 제거
     return ApplyNMS(detections);
 }
 

@@ -42,9 +42,9 @@ public:
         bool enable_fp16 = true;
         bool enable_int8 = false;
         
-        // 추론 설정
-        int input_width = 640;
-        int input_height = 640;
+        // 추론 설정 (Phase 0 연구 기반 320x320 최적화)
+        int input_width = 320;
+        int input_height = 320;
         float nms_threshold = 0.45f;
         int max_detections = 100;
         
