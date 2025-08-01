@@ -1,6 +1,6 @@
 #pragma once
 
-#include "capture/HighSpeedCapture.h"
+#include "interfaces/ICaptureDevice.h"
 #include <gmock/gmock.h>
 #include <opencv2/opencv.hpp>
 #include <vector>
@@ -9,7 +9,7 @@
 /**
  * @brief 화면 캡처 Mock 클래스
  */
-class MockScreenCapture {
+class MockScreenCapture : public ICaptureDevice {
 public:
     /**
      * @brief Mock 생성자
@@ -21,18 +21,17 @@ public:
      */
     virtual ~MockScreenCapture() = default;
     
-    // Mock 메서드들
-    MOCK_METHOD(bool, Initialize, (), ());
-    MOCK_METHOD(bool, Initialize, (const HighSpeedCapture::CaptureSettings& settings), ());
-    MOCK_METHOD(void, Cleanup, (), ());
-    MOCK_METHOD(bool, CaptureFrame, (), ());
-    MOCK_METHOD(bool, CaptureScreen, (), ());
-    MOCK_METHOD(cv::Mat, GetLatestFrame, (), (const));
-    MOCK_METHOD(bool, SetTargetMonitor, (int monitorIndex), ());
-    MOCK_METHOD(int, GetCurrentMonitorIndex, (), (const));
-    MOCK_METHOD(std::vector<HighSpeedCapture::MonitorInfo>, GetAvailableMonitors, (), (const));
-    MOCK_METHOD(void, UpdateSettings, (const HighSpeedCapture::CaptureSettings& settings), ());
-    MOCK_METHOD(HighSpeedCapture::CaptureSettings, GetSettings, (), (const));
+    // Mock 메서드들 - ICaptureDevice 인터페이스 구현
+    MOCK_METHOD(bool, Initialize, (const CaptureSettings& settings), (override));
+    MOCK_METHOD(bool, StartCapture, (int monitor_index), (override));
+    MOCK_METHOD(void, StopCapture, (), (override));
+    MOCK_METHOD(bool, CaptureFrame, (cv::Mat& output_frame), (override));
+    MOCK_METHOD(std::vector<MonitorInfo>, GetAvailableMonitors, (), (const, override));
+    MOCK_METHOD(bool, IsCapturing, (), (const, override));
+    MOCK_METHOD(int, GetCurrentMonitorIndex, (), (const, override));
+    MOCK_METHOD(bool, UpdateSettings, (const CaptureSettings& settings), (override));
+    MOCK_METHOD(std::string, GetPerformanceStats, (), (const, override));
+    MOCK_METHOD(void, Cleanup, (), (override));
     
     // 헬퍼 메서드들
     
@@ -46,7 +45,7 @@ public:
      * @brief 테스트용 모니터 목록 설정
      * @param monitors 모니터 정보 목록
      */
-    void SetMockMonitors(const std::vector<HighSpeedCapture::MonitorInfo>& monitors);
+    void SetMockMonitors(const std::vector<MonitorInfo>& monitors);
     
     /**
      * @brief 캡처 성공률 설정
@@ -108,8 +107,8 @@ public:
 private:
     cv::Mat m_mock_frame;
     std::vector<cv::Mat> m_frame_sequence;
-    std::vector<HighSpeedCapture::MonitorInfo> m_mock_monitors;
-    HighSpeedCapture::CaptureSettings m_mock_settings;
+    std::vector<MonitorInfo> m_mock_monitors;
+    CaptureSettings m_mock_settings;
     
     int m_current_frame_index = 0;
     int m_capture_call_count = 0;

@@ -25,7 +25,7 @@ TEST_F(ConfigManagerTest, DefaultConstructor) {
     // 기본 설정이 로드되어야 함
     auto config = config_manager->getAllConfig();
     EXPECT_FALSE(config.empty());
-    EXPECT_TRUE(config.contains("educational_framework"));
+    EXPECT_TRUE(config.contains("production_system"));
     EXPECT_TRUE(config.contains("vision_algorithms"));
 }
 
@@ -227,5 +227,5 @@ TEST_F(ConfigManagerTest, MemoryUsage) {
     
     // setConfig method doesn't exist - use default config
     auto retrieved_config = config_manager->getAllConfig();
-    EXPECT_TRUE(retrieved_config.contains("educational_framework"));
+    EXPECT_TRUE(retrieved_config.contains("production_system"));
 }

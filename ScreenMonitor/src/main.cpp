@@ -48,26 +48,51 @@ void PrintApplicationInfo() {
 #ifdef _WIN32
 #include <windows.h>
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Pure GUI application - no console window
+    // Debug console for troubleshooting GUI startup issues
+    #ifdef _DEBUG
+    AllocConsole();
+    freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+    freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
+    freopen_s((FILE**)stdin, "CONIN$", "r", stdin);
+    std::cout.clear();
+    std::cerr.clear();
+    std::cin.clear();
+    SetConsoleTitle(L"SmartScreenCapture Debug Console");
+    std::cout << "=== DEBUG CONSOLE ACTIVE ===" << std::endl;
+    #endif
 #else
 int main() {
 #endif
     PrintApplicationInfo();
     
-    // Initialize the GUI system
+    // Initialize the GUI system with enhanced error handling
     std::unique_ptr<MainInterface> gui;
     try {
-        std::cout << "\nInitializing Windows GUI Application..." << std::endl;
+        std::cout << "\n=== Starting GUI Initialization ===" << std::endl;
+        std::cout << "Step 1: Creating MainInterface object..." << std::endl;
         gui = std::make_unique<MainInterface>();
+        std::cout << "Step 1: SUCCESS - MainInterface created" << std::endl;
         
+        std::cout << "Step 2: Initializing GUI components..." << std::endl;
         if (!gui->Initialize()) {
-            std::cerr << "Failed to initialize GUI system" << std::endl;
+            std::cerr << "ERROR: GUI initialization failed!" << std::endl;
+            std::cerr << "Common causes:" << std::endl;
+            std::cerr << "1. OpenGL 3.3 not supported by graphics driver" << std::endl;
+            std::cerr << "2. GLFW initialization failure" << std::endl;
+            std::cerr << "3. Window creation failure" << std::endl;
+            std::cerr << "4. ImGui context creation failure" << std::endl;
+            
+            #ifdef _DEBUG
+            std::cout << "Press Enter to exit..." << std::endl;
+            std::cin.get();
+            #endif
             return -1;
         }
+        std::cout << "Step 2: SUCCESS - GUI initialized" << std::endl;
         
         std::cout << "\n=== System Initialization Complete ===" << std::endl;
         std::cout << "Windows GUI Application is now ready!" << std::endl;
-        std::cout << "You can now:" << std::endl;
+        std::cout << "Features available:" << std::endl;
         std::cout << "1. Select a monitor from the dropdown" << std::endl;
         std::cout << "2. Click 'Start Capture' to begin real-time screen capture" << std::endl;
         std::cout << "3. Configure HSV color detection settings" << std::endl;
@@ -75,11 +100,30 @@ int main() {
         std::cout << "5. Monitor real-time performance metrics" << std::endl;
         std::cout << "\nClose the GUI window to exit." << std::endl;
         
-        // Run the main GUI application loop
+        // Run the main GUI application loop with debugging
+        std::cout << "\nStep 3: Starting main application loop..." << std::endl;
+        int frame_count = 0;
+        auto start_time = std::chrono::steady_clock::now();
+        
         while (!gui->ShouldClose()) {
-            gui->HandleEvents();
-            gui->Render();
+            try {
+                gui->HandleEvents();
+                gui->Render();
+                frame_count++;
+                
+                // Debug output every 60 frames (approximately 1 second at 60 FPS)
+                if (frame_count % 60 == 0) {
+                    auto current_time = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+                    std::cout << "GUI running: " << frame_count << " frames, " << elapsed << " seconds" << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "ERROR in main loop: " << e.what() << std::endl;
+                break;
+            }
         }
+        
+        std::cout << "Main loop exited after " << frame_count << " frames" << std::endl;
         
     } catch (const std::exception& e) {
         std::cerr << "Critical error: " << e.what() << std::endl;

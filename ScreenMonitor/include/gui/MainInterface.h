@@ -7,9 +7,10 @@
 #include <iostream>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
-
-// Conditional GUI compilation
-#ifndef DISABLE_GUI
+#include "core/ConfigManager.h"
+ 
+ // Conditional GUI compilation
+ #ifndef DISABLE_GUI
     // GUI fully enabled with GLFW + OpenGL3
     #include <GLFW/glfw3.h>
     
@@ -157,11 +158,20 @@ private:
     void RenderPerformancePanel();
     void RenderConsolePanel();
     void RenderStatusBar();
+    void RenderAboutDialog();
+
+    // 설정 관리 헬퍼
+    void SaveConfiguration();
+    void LoadConfiguration();
+    void ApplyConfiguration();
+    void UpdateConfigurationFromGui();
+    void AutoSaveConfiguration();
 
 private:
     bool m_initialized = false;
     
 #if GUI_ENABLED
+    bool m_resetLayout = false;
     GLFWwindow* m_window = nullptr;
     ImGuiContext* m_imguiContext = nullptr;
     
@@ -181,6 +191,7 @@ private:
     bool m_yoloEnabled = false;
     int m_selectedMonitor = 0;
     std::vector<std::string> m_monitorList;
+    bool m_showAboutDialog = false;
     
     // HSV 설정
     int m_hsvLower[3] = {140, 120, 180};
@@ -224,4 +235,8 @@ private:
     std::unique_ptr<GuiStreamBuf> m_cerrRedirect;
     std::streambuf* m_originalCout;
     std::streambuf* m_originalCerr;
+
+    // 설정 관리
+    ConfigManager m_configManager;
+    std::string m_configFilePath = "config/config.json";
 };

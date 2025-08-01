@@ -15,15 +15,16 @@ MockScreenCapture::MockScreenCapture() {
     
     // 기본 모니터 정보 생성
     m_mock_monitors = {
-        {"Primary Monitor", 1920, 1080, true},
-        {"Secondary Monitor", 1280, 720, false},
-        {"Third Monitor", 1440, 900, false}
+        MonitorInfo(0, "Primary Monitor", 1920, 1080, 0, 0, true),
+        MonitorInfo(1, "Secondary Monitor", 1280, 720, 1920, 0, false),
+        MonitorInfo(2, "Third Monitor", 1440, 900, 0, 1080, false)
     };
     
     // 기본 설정
-    m_mock_settings.selectedMonitorIndex = 0;
-    m_mock_settings.targetFPS = 60.0;
-    m_mock_settings.enableFPSLimiting = false;
+    m_mock_settings.target_fps = 60;
+    m_mock_settings.enable_cursor = false;
+    m_mock_settings.enable_border = false;
+    m_mock_settings.capture_area = cv::Rect(0, 0, 0, 0);
     
     SetupDefaultBehavior();
 }
@@ -32,7 +33,7 @@ void MockScreenCapture::SetMockFrame(const cv::Mat& frame) {
     m_mock_frame = frame.clone();
 }
 
-void MockScreenCapture::SetMockMonitors(const std::vector<HighSpeedCapture::MonitorInfo>& monitors) {
+void MockScreenCapture::SetMockMonitors(const std::vector<MonitorInfo>& monitors) {
     m_mock_monitors = monitors;
 }
 
@@ -47,67 +48,72 @@ void MockScreenCapture::SetFrameSequence(const std::vector<cv::Mat>& frames) {
 
 void MockScreenCapture::SetupDefaultBehavior() {
     // 초기화 성공
-    ON_CALL(*this, Initialize())
-        .WillByDefault(Invoke([this]() {
-            SimulateProcessingDelay();
-            m_is_initialized = !m_should_fail;
-            return m_is_initialized;
-        }));
-    
     ON_CALL(*this, Initialize(_))
-        .WillByDefault(Invoke([this](const HighSpeedCapture::CaptureSettings& settings) {
+        .WillByDefault(Invoke([this](const CaptureSettings& settings) {
             SimulateProcessingDelay();
             m_mock_settings = settings;
             m_is_initialized = !m_should_fail;
             return m_is_initialized;
         }));
     
-    // 캡처 성공
-    ON_CALL(*this, CaptureFrame())
+    // 캡처 시작
+    ON_CALL(*this, StartCapture(_))
+        .WillByDefault(Invoke([this](int monitor_index) {
+            SimulateProcessingDelay();
+            if (monitor_index >= 0 && monitor_index < static_cast<int>(m_mock_monitors.size()) && m_is_initialized) {
+                return ShouldSucceed();
+            }
+            return false;
+        }));
+    
+    // 캡처 중지
+    ON_CALL(*this, StopCapture())
         .WillByDefault(Invoke([this]() {
+            // 캡처 중지 로직
+        }));
+    
+    // 프레임 캡처
+    ON_CALL(*this, CaptureFrame(_))
+        .WillByDefault(Invoke([this](cv::Mat& output_frame) {
             SimulateProcessingDelay();
             m_capture_call_count++;
-            return ShouldSucceed() && m_is_initialized;
-        }));
-    
-    ON_CALL(*this, CaptureScreen())
-        .WillByDefault(Invoke([this]() {
-            return CaptureFrame();
-        }));
-    
-    // 프레임 반환
-    ON_CALL(*this, GetLatestFrame())
-        .WillByDefault(Invoke([this]() -> cv::Mat {
-            if (!m_is_initialized) {
-                return cv::Mat();
+            
+            if (!m_is_initialized || !ShouldSucceed()) {
+                return false;
             }
-            return GetNextFrame();
-        }));
-    
-    // 모니터 관리
-    ON_CALL(*this, SetTargetMonitor(_))
-        .WillByDefault(Invoke([this](int monitorIndex) {
-            if (monitorIndex >= 0 && monitorIndex < static_cast<int>(m_mock_monitors.size())) {
-                m_mock_settings.selectedMonitorIndex = monitorIndex;
+            
+            cv::Mat frame = GetNextFrame();
+            if (!frame.empty()) {
+                frame.copyTo(output_frame);
                 return true;
             }
             return false;
         }));
     
-    ON_CALL(*this, GetCurrentMonitorIndex())
-        .WillByDefault(Return(m_mock_settings.selectedMonitorIndex));
-    
+    // 모니터 목록 반환
     ON_CALL(*this, GetAvailableMonitors())
         .WillByDefault(Return(m_mock_monitors));
     
-    // 설정 관리
+    // 캡처 상태 확인
+    ON_CALL(*this, IsCapturing())
+        .WillByDefault(Return(m_is_initialized));
+    
+    // 현재 모니터 인덱스
+    ON_CALL(*this, GetCurrentMonitorIndex())
+        .WillByDefault(Return(0));
+    
+    // 설정 업데이트
     ON_CALL(*this, UpdateSettings(_))
-        .WillByDefault(Invoke([this](const HighSpeedCapture::CaptureSettings& settings) {
+        .WillByDefault(Invoke([this](const CaptureSettings& settings) {
             m_mock_settings = settings;
+            return true;
         }));
     
-    ON_CALL(*this, GetSettings())
-        .WillByDefault(Return(m_mock_settings));
+    // 성능 통계
+    ON_CALL(*this, GetPerformanceStats())
+        .WillByDefault(Invoke([this]() {
+            return "Mock Performance Stats: FPS=60.0, Calls=" + std::to_string(m_capture_call_count);
+        }));
     
     // 정리
     ON_CALL(*this, Cleanup())
@@ -121,22 +127,19 @@ void MockScreenCapture::SetupDefaultBehavior() {
 void MockScreenCapture::SetupFailureScenario() {
     m_should_fail = true;
     
-    ON_CALL(*this, Initialize())
-        .WillByDefault(Return(false));
-    
     ON_CALL(*this, Initialize(_))
         .WillByDefault(Return(false));
     
-    ON_CALL(*this, CaptureFrame())
+    ON_CALL(*this, StartCapture(_))
         .WillByDefault(Return(false));
     
-    ON_CALL(*this, CaptureScreen())
+    ON_CALL(*this, CaptureFrame(_))
         .WillByDefault(Return(false));
     
-    ON_CALL(*this, GetLatestFrame())
-        .WillByDefault(Return(cv::Mat()));
+    ON_CALL(*this, IsCapturing())
+        .WillByDefault(Return(false));
     
-    ON_CALL(*this, SetTargetMonitor(_))
+    ON_CALL(*this, UpdateSettings(_))
         .WillByDefault(Return(false));
 }
 
@@ -154,8 +157,7 @@ void MockScreenCapture::SetupPerformanceScenario() {
     SetFrameSequence(frames);
     
     // 높은 FPS 설정
-    m_mock_settings.targetFPS = 120.0;
-    m_mock_settings.enableFPSLimiting = false;
+    m_mock_settings.target_fps = 120;
 }
 
 bool MockScreenCapture::ShouldSucceed() {
