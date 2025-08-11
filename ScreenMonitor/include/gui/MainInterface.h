@@ -97,6 +97,7 @@ public:
     bool StartCapture(int monitorIndex = 0);
     void StopCapture();
     void PollCaptureFrame();
+    void RefreshMonitorList();
 
     /**
      * @brief 화면 업데이트
@@ -273,4 +274,7 @@ private:
     // 캡처 디바이스
     std::unique_ptr<ScreenCaptureLiteDevice> m_captureDevice;
     std::chrono::steady_clock::time_point m_lastFrameTime{std::chrono::steady_clock::now()};
+    // 모니터 선택/관리
+    std::vector<ICaptureDevice::MonitorInfo> m_monitors;
+    int m_selectedMonitor = 0;
 };
