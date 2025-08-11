@@ -156,6 +156,9 @@ private:
     int output_binding_index_ = -1;
     size_t input_size_ = 0;
     size_t output_size_ = 0;
+    
+    // TensorRT 로거
+    nvinfer1::ILogger trt_logger_;
 #endif
 
     // OpenCV DNN 폴백

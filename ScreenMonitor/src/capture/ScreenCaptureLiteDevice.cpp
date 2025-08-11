@@ -335,17 +335,9 @@ bool ScreenCaptureLiteDevice::InitializeCaptureManager() {
             return SL::Screen_Capture::GetMonitors();
         });
         
-        // 프레임 변경 콜백 설정
-        config->onFrameChanged([this](const SL::Screen_Capture::Image& image, 
-                                     const SL::Screen_Capture::Monitor& monitor) {
-            this->OnFrameChanged(image, monitor);
-        });
-        
-        // 오류 콜백 설정
-        config->onNewFrame([this](const SL::Screen_Capture::Image& image, 
-                                 const SL::Screen_Capture::Monitor& monitor) {
-            // 새 프레임이 도착했을 때의 추가 처리
-            // 현재는 onFrameChanged와 동일한 처리
+        // 단일 콜백만 사용 (이전: onFrameChanged + onNewFrame 중복 처리)
+        config->onNewFrame([this](const SL::Screen_Capture::Image& image,
+                                  const SL::Screen_Capture::Monitor& monitor) {
             this->OnFrameChanged(image, monitor);
         });
         

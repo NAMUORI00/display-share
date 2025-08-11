@@ -1,0 +1,17 @@
+* text=auto eol=lf
+
+# Force binary for images and models
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.bmp binary
+*.bin binary
+*.onnx binary
+*.engine binary
+
+# Keep Windows batch files CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Prevent merge conflicts for lock/cmake cache
+CMakeCache.txt -merge

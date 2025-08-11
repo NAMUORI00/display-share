@@ -1,5 +1,5 @@
-#include "../../include/detection/HSVColorDetection.h"
-#include "../../include/core/Constants.h"
+#include "detection/HSVColorDetection.h"
+#include "core/Constants.h"
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>

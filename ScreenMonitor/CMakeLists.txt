@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28...3.30)
 
+# Export compile commands for IDE/intellisense
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Adopt newer policies explicitly when available (incrementally add as needed)
 if(POLICY CMP0177)
     # Normalize install() DESTINATION paths (suppresses related dev warning)
@@ -378,6 +381,7 @@ add_executable(${PROJECT_NAME}_tests
     tests/helpers/TestImageGenerator.cpp
     tests/helpers/ConfigTestHelper.cpp
     tests/mocks/MockScreenCapture.cpp
+    # Note: 기타 비핵심/중복/실험용 테스트는 Option C 정리에서 제거
 )
 
 # Include directories for tests

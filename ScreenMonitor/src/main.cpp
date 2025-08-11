@@ -64,7 +64,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::cout.clear();
     std::cerr.clear();
     std::cin.clear();
-    SetConsoleTitle(L"SmartScreenCapture Debug Console");
+    SetConsoleTitleA("SmartScreenCapture Debug Console");
     std::cout << "=== DEBUG CONSOLE ACTIVE ===" << std::endl;
     #endif
 #else
@@ -194,6 +194,7 @@ int main() {
         std::cerr << "3. All dependencies are properly linked" << std::endl;
         return -1;
     }
+    */
     
     std::cout << "\n=== Application Shutdown ===" << std::endl;
     std::cout << "Smart Screen Capture system has been shut down successfully." << std::endl;
