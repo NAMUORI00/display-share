@@ -1,90 +1,77 @@
 #pragma once
 
-#include "detection/HSVColorDetection.h"
+#include "interfaces/IDetectionAlgorithm.h"
 #include <gmock/gmock.h>
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-namespace ScreenMonitor {
-
 /**
- * @brief HSV 색상 검출기 Mock 클래스 (간소화된 버전)
+ * @brief HSV Color Detection Mock Class for Phase 5 QA Testing
+ * 
+ * Mock implementation of IDetectionAlgorithm interface for controlled
+ * testing of HSV color detection functionality in the 320x320 system.
  */
-class MockHSVDetector {
+class MockHSVDetector : public IDetectionAlgorithm {
 public:
     MockHSVDetector() = default;
     virtual ~MockHSVDetector() = default;
     
-    // 핵심 Mock 메서드들만 유지
-    MOCK_METHOD(cv::Rect, detectTarget, (const cv::Mat& image), ());
-    MOCK_METHOD(std::vector<DetectionResult>, detectMultipleTargets, (const cv::Mat& image), ());
-    MOCK_METHOD(void, setHSVRange, (const HSVRange& range), ());
-    MOCK_METHOD(HSVRange, getHSVRange, (), (const));
-    MOCK_METHOD(bool, initialize, (), ());
+    // IDetectionAlgorithm interface mocks
+    MOCK_METHOD(bool, Initialize, (const AlgorithmSettings& settings), (override));
+    MOCK_METHOD(DetectionResult, DetectSingle, (const cv::Mat& image), (override));
+    MOCK_METHOD(std::vector<DetectionResult>, DetectMultiple, (const cv::Mat& image), (override));
+    MOCK_METHOD(std::vector<DetectionResult>, DetectInROI, (const cv::Mat& image, const cv::Rect& roi), (override));
+    MOCK_METHOD(bool, UpdateSettings, (const AlgorithmSettings& settings), (override));
+    MOCK_METHOD(std::string, GetAlgorithmName, (), (const, override));
+    MOCK_METHOD(std::string, GetVersion, (), (const, override));
+    MOCK_METHOD(std::vector<std::string>, GetSupportedClasses, (), (const, override));
+    MOCK_METHOD(std::string, GetPerformanceStats, (), (const, override));
+    MOCK_METHOD(void, Reset, (), (override));
+    MOCK_METHOD(void, Cleanup, (), (override));
     
-    // 헬퍼 메서드들
-    void SetMockDetectionResult(const cv::Rect& result) {
-        m_mock_detection = result;
+    // Simplified DetectObjects method for compatibility with existing tests
+    MOCK_METHOD(std::vector<cv::Rect>, DetectObjects, (const cv::Mat& image), ());
+    
+    // Helper methods for test setup
+    void SetMockDetectionResult(const DetectionResult& result) {
+        mock_single_result_ = result;
     }
     
     void SetMockDetectionResults(const std::vector<DetectionResult>& results) {
-        m_mock_results = results;
+        mock_multiple_results_ = results;
     }
     
+    void SetMockObjectRects(const std::vector<cv::Rect>& rects) {
+        mock_object_rects_ = rects;
+    }
+    
+    void SetMockPerformanceStats(const std::string& stats) {
+        mock_performance_stats_ = stats;
+    }
+
     void SetupDefaultBehavior() {
         using ::testing::Return;
-        using ::testing::Invoke;
+        using ::testing::_;
         
-        ON_CALL(*this, detectTarget)
-            .WillByDefault(Return(m_mock_detection));
-            
-        ON_CALL(*this, detectMultipleTargets)
-            .WillByDefault(Return(m_mock_results));
-            
-        ON_CALL(*this, initialize)
+        ON_CALL(*this, Initialize(_))
             .WillByDefault(Return(true));
+            
+        ON_CALL(*this, GetAlgorithmName())
+            .WillByDefault(Return("MockHSVDetector"));
+            
+        ON_CALL(*this, GetVersion())
+            .WillByDefault(Return("1.0.0-test"));
+            
+        ON_CALL(*this, DetectObjects(_))
+            .WillByDefault(Return(mock_object_rects_));
+            
+        ON_CALL(*this, DetectMultiple(_))
+            .WillByDefault(Return(mock_multiple_results_));
     }
-    
-private:
-    cv::Rect m_mock_detection{100, 100, 50, 50};
-    std::vector<DetectionResult> m_mock_results;
-    HSVRange m_mock_range{140, 160, 120, 200, 180, 255};
-};
 
-/**
- * @brief YOLO 객체 검출기 Mock 클래스 (간소화된 버전)
- */
-class MockYOLODetector {
-public:
-    MockYOLODetector() = default;
-    virtual ~MockYOLODetector() = default;
-    
-    // 핵심 Mock 메서드들만 유지
-    MOCK_METHOD(std::vector<DetectionBox>, detect, (const cv::Mat& image), ());
-    MOCK_METHOD(bool, initialize, (const std::string& model_path), ());
-    MOCK_METHOD(bool, isInitialized, (), (const));
-    
-    // 헬퍼 메서드들
-    void SetMockDetectionResults(const std::vector<DetectionBox>& results) {
-        m_mock_results = results;
-    }
-    
-    void SetupDefaultBehavior() {
-        using ::testing::Return;
-        using ::testing::Invoke;
-        
-        ON_CALL(*this, detect)
-            .WillByDefault(Return(m_mock_results));
-            
-        ON_CALL(*this, initialize)
-            .WillByDefault(Return(true));
-            
-        ON_CALL(*this, isInitialized)
-            .WillByDefault(Return(true));
-    }
-    
 private:
-    std::vector<DetectionBox> m_mock_results;
+    DetectionResult mock_single_result_;
+    std::vector<DetectionResult> mock_multiple_results_;
+    std::vector<cv::Rect> mock_object_rects_;
+    std::string mock_performance_stats_;
 };
-
-} // namespace ScreenMonitor
