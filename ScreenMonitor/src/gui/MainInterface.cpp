@@ -5,6 +5,7 @@
 #include <cstring>
 #include <chrono>
 #include <iomanip>
+#include <algorithm>
 
 // ImGui core (always available)
 #include <imgui.h>
@@ -14,6 +15,17 @@
 // ImGui with full backend support
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <GLFW/glfw3.h>
+
+#ifdef _WIN32
+#include <GL/gl.h>
+// Windows OpenGL 확장 상수 정의
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#else
+#include <OpenGL/gl.h>
+#endif
 
 // Error callback for GLFW
 static void glfw_error_callback(int error, const char* description) {
@@ -220,7 +232,7 @@ void MainInterface::Render() {
     ImGui::NewFrame();
 
     // 메인 도킹 공간 설정
-    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(ImGui::GetMainViewport());
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
     
     // 첫 실행 시 레이아웃 초기화
     static bool first_time = true;
@@ -297,7 +309,7 @@ void MainInterface::RenderROIVisualizationPanel() {
             const float aspect_ratio = 1.0f; // 320x320 = 1:1 비율
             
             // 320x320 이미지에 맞는 크기 계산
-            float display_width = std::min(content_region.x - 20.0f, content_region.y - 100.0f);
+            float display_width = (std::min)(content_region.x - 20.0f, content_region.y - 100.0f);
             float display_height = display_width / aspect_ratio;
             
             if (display_height > content_region.y - 100.0f) {
@@ -365,7 +377,7 @@ void MainInterface::RenderDetectionResultsPanel() {
                 ImGui::Text("Detected Points: %zu", m_hsvDetections.size());
                 
                 // 최근 검출된 좌표들 표시 (최대 10개)
-                const size_t max_display = std::min(m_hsvDetections.size(), size_t(10));
+                const size_t max_display = (std::min)(m_hsvDetections.size(), size_t(10));
                 for (size_t i = 0; i < max_display; ++i) {
                     const cv::Point& pt = m_hsvDetections[i];
                     ImGui::Text("  Point %zu: (%d, %d)", i + 1, pt.x, pt.y);

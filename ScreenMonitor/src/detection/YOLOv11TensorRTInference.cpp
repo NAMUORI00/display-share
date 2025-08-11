@@ -1,5 +1,5 @@
-#include "../../include/detection/YOLOv11TensorRTInference.h"
-#include "../../include/core/Constants.h"
+#include "detection/YOLOv11TensorRTInference.h"
+#include "core/Constants.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -635,7 +635,7 @@ bool YOLOv11TensorRTInference::LoadTensorRTEngine() {
         engine_file.close();
         
         // 런타임 생성
-        runtime_ = std::unique_ptr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(trt_logger));
+        runtime_ = std::unique_ptr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(trt_logger_));
         if (!runtime_) {
             std::cerr << "[YOLOv11TensorRT] Failed to create TensorRT runtime" << std::endl;
             return false;

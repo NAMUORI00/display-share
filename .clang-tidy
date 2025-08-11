@@ -1,0 +1,5 @@
+Checks: '-*,bugprone-*,performance-*,readability-*,-readability-magic-numbers,modernize-*,cppcoreguidelines-*,-cppcoreguidelines-avoid-magic-numbers'
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|include)'
+AnalyzeTemporaryDtors: false
+FormatStyle: none

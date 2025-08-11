@@ -7,6 +7,9 @@
 #include <chrono>
 #include <atomic>
 #include <vector>
+#include <mutex>      // std::mutex usage
+#include <string>     // std::string return types
+#include <cstdint>    // fixed-width integer types in counters
 
 // Forward declaration for screen_capture_lite
 namespace SL {
