@@ -100,6 +100,7 @@ set(BUILD_opencv_apps OFF CACHE BOOL "" FORCE)
 set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(WITH_IPP OFF CACHE BOOL "" FORCE)
 set(WITH_ITT OFF CACHE BOOL "" FORCE)
+set(WITH_AVIF OFF CACHE BOOL "Disable AVIF to avoid missing include on some Windows setups" FORCE)
 
 # Disable problematic modules for Windows compatibility  
 set(BUILD_opencv_video OFF CACHE BOOL "" FORCE)
