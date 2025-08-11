@@ -10,6 +10,7 @@
 #include "core/ConfigManager.h"
 #include "capture/CenterRegionCapture.h"
 #include "monitoring/SimpleMetrics.h"
+#include "capture/ScreenCaptureLiteDevice.h"
  
  // Conditional GUI compilation
  #ifndef DISABLE_GUI
@@ -91,6 +92,11 @@ public:
      * @brief 이벤트 처리
      */
     void HandleEvents();
+
+    // 캡처 제어 (GUI 버튼/메뉴에서 사용)
+    bool StartCapture(int monitorIndex = 0);
+    void StopCapture();
+    void PollCaptureFrame();
 
     /**
      * @brief 화면 업데이트
@@ -263,4 +269,8 @@ private:
     // 설정 관리
     ConfigManager m_configManager;
     std::string m_configFilePath = "config/config.json";
+
+    // 캡처 디바이스
+    std::unique_ptr<ScreenCaptureLiteDevice> m_captureDevice;
+    std::chrono::steady_clock::time_point m_lastFrameTime{std::chrono::steady_clock::now()};
 };
