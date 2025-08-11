@@ -7,6 +7,9 @@
 #include <iomanip>
 #include <algorithm>
 
+// Capture interface (CaptureSettings 정의 포함)
+#include "interfaces/ICaptureDevice.h"
+
 // ImGui core (always available)
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -70,6 +73,8 @@ MainInterface::MainInterface()
     
     // FPS 히스토리 초기화
     m_fpsHistory.reserve(FPS_HISTORY_SIZE);
+
+    // 캡처 디바이스 초기화 지연 생성 (StartCapture에서 생성)
 }
 
 MainInterface::~MainInterface() {
@@ -150,6 +155,8 @@ bool MainInterface::Initialize() {
 
     m_initialized = true;
     std::cout << "Modern 320x320 ROI GUI System initialized successfully!" << std::endl;
+    // 자동 캡처 시작을 원하면 다음 줄을 활성화
+    // StartCapture(0);
     
     return true;
 #else
@@ -264,6 +271,9 @@ void MainInterface::Render() {
     RenderDetectionResultsPanel();    // 검출 결과 표시
     RenderControlPanel();             // 간소화된 제어
     RenderPerformanceDashboard();     // 성능 모니터링
+
+    // 프레임 렌더링 후 캡처 프레임 폴링 (UI 이벤트와 분리)
+    PollCaptureFrame();
 
     // 상태바 렌더링
     RenderStatusBar();
@@ -449,8 +459,14 @@ void MainInterface::RenderControlPanel() {
         ImGui::Separator();
 
         // 메인 제어
-        if (ImGui::Button(m_captureEnabled ? "🛑 Stop Detection" : "▶️ Start Detection", ImVec2(-1, 40))) {
-            m_captureEnabled = !m_captureEnabled;
+        if (ImGui::Button(m_captureEnabled ? "🛑 Stop Capture" : "▶️ Start Capture", ImVec2(-1, 40))) {
+            if (!m_captureEnabled) {
+                if (!StartCapture(0)) {
+                    AddLogMessage("Failed to start capture", 2);
+                }
+            } else {
+                StopCapture();
+            }
         }
 
         ImGui::Spacing();
@@ -765,6 +781,7 @@ void MainInterface::Cleanup() {
     
     glfwTerminate();
 #endif
+    StopCapture();
     m_initialized = false;
 }
 
@@ -811,6 +828,71 @@ void MainInterface::HandleEvents() {
         glfwPollEvents();
     }
 #endif
+}
+
+bool MainInterface::StartCapture(int monitorIndex) {
+    if (m_captureEnabled) return true;
+    try {
+        if (!m_captureDevice) {
+            m_captureDevice = std::make_unique<ScreenCaptureLiteDevice>();
+        }
+    ICaptureDevice::CaptureSettings settings; // 기본 캡처 설정 구조체
+    settings.target_fps = static_cast<int>(m_targetFPS);
+        if (!m_captureDevice->Initialize(settings)) {
+            AddLogMessage("Capture device init failed", 2);
+            return false;
+        }
+        m_captureDevice->SetCenterRegionMode(true);
+        if (!m_captureDevice->StartCapture(monitorIndex)) {
+            AddLogMessage("Capture start failed", 2);
+            return false;
+        }
+        m_captureEnabled = true;
+        m_lastFrameTime = std::chrono::steady_clock::now();
+        AddLogMessage("Capture started", 0);
+        return true;
+    } catch (const std::exception& e) {
+        AddLogMessage(std::string("Capture start exception: ")+e.what(), 2);
+        return false;
+    }
+}
+
+void MainInterface::StopCapture() {
+    if (!m_captureEnabled) return;
+    try {
+        if (m_captureDevice) {
+            m_captureDevice->StopCapture();
+        }
+    } catch (...) {}
+    m_captureEnabled = false;
+    AddLogMessage("Capture stopped", 0);
+}
+
+void MainInterface::PollCaptureFrame() {
+    if (!m_captureEnabled || !m_captureDevice) return;
+    cv::Mat full, roi;
+    if (m_captureDevice->CaptureFrame(full)) {
+        // 전체 프레임 필요 시: UpdateFrame(full);
+        if (m_captureDevice->GetCenterRegion(roi) && !roi.empty()) {
+            // RegionInfo 계산 (ScreenCaptureLiteDevice 내부 변환 미사용하므로 CenterRegionCapture 로 재계산)
+            CenterRegionCapture::RegionInfo info;
+            info.width = CenterRegionCapture::TARGET_WIDTH;
+            info.height = CenterRegionCapture::TARGET_HEIGHT;
+            info.source_width = full.cols;
+            info.source_height = full.rows;
+            info.x = (full.cols - info.width)/2;
+            info.y = (full.rows - info.height)/2;
+            info.scale_x = 1.0; info.scale_y = 1.0;
+            UpdateROIFrame(roi, info);
+            auto now = std::chrono::steady_clock::now();
+            double dt = std::chrono::duration<double>(now - m_lastFrameTime).count();
+            if (dt > 0) {
+                double fps = 1.0 / dt;
+                UpdateFPS(static_cast<float>(fps));
+            }
+            m_lastFrameTime = now;
+        }
+    }
 }
 
 bool MainInterface::ShouldClose() const {
