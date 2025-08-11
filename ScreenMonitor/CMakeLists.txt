@@ -327,59 +327,59 @@ if(NOT WIN32)
     target_compile_definitions(${PROJECT_NAME}_lib PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
 endif()
 
-# Main test executable (temporarily disabled for Phase 1 cleanup)
-# add_executable(${PROJECT_NAME}_tests
-#     tests/test_ConfigManager.cpp
-#     # tests/test_MainInterface.cpp  # Temporarily disabled for cleanup
-#     tests/helpers/TestImageGenerator.cpp
-#     tests/helpers/ConfigTestHelper.cpp
-#     tests/helpers/GLTestContext.cpp
-#     tests/mocks/MockScreenCapture.cpp
-#     tests/mocks/MockHSVDetector.cpp
-# )
+# Main test executable - Phase 5 QA Integration Tests
+add_executable(${PROJECT_NAME}_tests
+    tests/test_ConfigManager.cpp
+    tests/test_CenterRegionCapture.cpp
+    tests/test_Phase5SystemValidation.cpp
+    tests/helpers/TestImageGenerator.cpp
+    tests/helpers/ConfigTestHelper.cpp
+    tests/mocks/MockScreenCapture.cpp
+)
 
-# Include directories for tests (temporarily disabled)
-# target_include_directories(${PROJECT_NAME}_tests PRIVATE
-#     include/
-#     tests/
-#     tests/helpers/
-#     tests/mocks/
-#     external/screen_capture_lite/include
-# )
+# Include directories for tests
+target_include_directories(${PROJECT_NAME}_tests PRIVATE
+    include/
+    tests/
+    tests/helpers/
+    tests/mocks/
+    external/screen_capture_lite/include
+)
 
-# Link test executable with library, GTest and GMock (temporarily disabled)
-# target_link_libraries(${PROJECT_NAME}_tests PRIVATE
-#     ${PROJECT_NAME}_lib
-#     gtest
-#     gtest_main
-#     gmock
-#     gmock_main
-# )
+# Link test executable with library, GTest and GMock
+target_link_libraries(${PROJECT_NAME}_tests PRIVATE
+    ${PROJECT_NAME}_lib
+    gtest
+    gtest_main
+    gmock
+    gmock_main
+)
 
-# Apply same compiler definitions to tests (temporarily disabled)
-# target_compile_definitions(${PROJECT_NAME}_tests PRIVATE
-#     WIN32_LEAN_AND_MEAN
-#     GTEST_HAS_PTHREAD=0  # Disable pthread for Windows compatibility
-#     GUI_ENABLED=1        # GUI 기능 활성화
-# )
+# Apply same compiler definitions to tests
+target_compile_definitions(${PROJECT_NAME}_tests PRIVATE
+    WIN32_LEAN_AND_MEAN
+    GTEST_HAS_PTHREAD=0  # Disable pthread for Windows compatibility
+    GUI_ENABLED=1        # GUI 기능 활성화
+)
 
-# if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-#     target_compile_definitions(${PROJECT_NAME}_tests PRIVATE _DEBUG)
-# else()
-#     target_compile_definitions(${PROJECT_NAME}_tests PRIVATE NDEBUG)
-# endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(${PROJECT_NAME}_tests PRIVATE _DEBUG)
+else()
+    target_compile_definitions(${PROJECT_NAME}_tests PRIVATE NDEBUG)
+endif()
 
-# if(NOT WIN32)
-#     target_compile_definitions(${PROJECT_NAME}_tests PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
-# endif()
+if(NOT WIN32)
+    target_compile_definitions(${PROJECT_NAME}_tests PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
+endif()
 
-# Discover tests (temporarily disabled)
-# gtest_discover_tests(${PROJECT_NAME}_tests)
+# Discover tests
+include(GoogleTest)
+gtest_discover_tests(${PROJECT_NAME}_tests)
 
-# Set output directory for test executables (temporarily disabled)
-# set_target_properties(${PROJECT_NAME}_tests
-#     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
-# )
+# Set output directory for test executables
+set_target_properties(${PROJECT_NAME}_tests
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+)
 
 message(STATUS "=== SmartScreenCapture Configuration Complete ===")
 message(STATUS "GUI: Fully Enabled (GLFW + ImGui + OpenGL3)")
