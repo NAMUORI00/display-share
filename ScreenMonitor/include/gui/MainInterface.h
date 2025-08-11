@@ -12,21 +12,30 @@
 #include "monitoring/SimpleMetrics.h"
 #include "capture/ScreenCaptureLiteDevice.h"
  
- // Conditional GUI compilation
- #ifndef DISABLE_GUI
+// Conditional GUI compilation
+#ifndef DISABLE_GUI
+    // Windows 헤더를 먼저 포함하여 GLFW에서 재정의 경고(APIENTRY 등) 최소화
+    #if defined(_WIN32)
+        #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+        #endif
+        #ifndef NOMINMAX
+        #define NOMINMAX
+        #endif
+        #include <windows.h>
+    #endif
     // GUI fully enabled with GLFW + OpenGL3
     #include <GLFW/glfw3.h>
-    
+
     // OpenGL types
     #if defined(_WIN32)
-        #include <windows.h>
         #include <GL/gl.h>
     #elif defined(__APPLE__)
         #include <OpenGL/gl.h>
     #else
         #include <GL/gl.h>
     #endif
-    
+
     #define GUI_ENABLED 1
 #else
     #define GUI_ENABLED 0
@@ -196,6 +205,11 @@ private:
     void ApplyConfiguration();
     void UpdateConfigurationFromGui();
     void AutoSaveConfiguration();
+    
+    // 검출 헬퍼 함수들
+    void PerformHSVDetection(const cv::Mat& roi, std::vector<cv::Point>& detections);
+    void PerformYOLODetection(const cv::Mat& roi, std::vector<cv::Rect>& boxes, 
+                              std::vector<float>& confidences, std::vector<std::string>& class_names);
 
 private:
     bool m_initialized = false;
