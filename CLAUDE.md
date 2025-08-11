@@ -1,6 +1,6 @@
-# CLAUDE.md
+# CLAUDE.md - C_capture 320x320 중심 영역 검출 시스템 완전 가이드
 
-Claude Code (claude.ai/code) 개발자를 위한 C_capture 프로젝트 가이드
+Claude Code (claude.ai/code) 개발자를 위한 C_capture 프로젝트 통합 가이드
 
 ## 프로젝트 개요
 
@@ -17,16 +17,11 @@ Claude Code (claude.ai/code) 개발자를 위한 C_capture 프로젝트 가이�
 
 ```
 C_capture/
-├── CLAUDE.md                    # 📍 이 파일 - 320x320 시스템 진입점
+├── CLAUDE.md                    # 📍 이 파일 - 320x320 시스템 완전 가이드
 ├── .gitmodules                  # Git submodule 구성 (최적화됨)
 ├── build/                       # CMake 빌드 결과물 (정적 링킹)
 │
 └── ScreenMonitor/               # 🎯 320x320 중심 영역 검출 시스템
-    ├── CLAUDE.md               # 320x320 시스템 완전 가이드
-    ├── src/CLAUDE.md           # 간소화된 아키텍처 가이드
-    ├── external/CLAUDE.md      # 최적화된 의존성 관리 가이드  
-    ├── tests/CLAUDE.md         # 320x320 특화 테스트 전략
-    │
     ├── CMakeLists.txt          # 최적화된 빌드 설정
     ├── README.md               # 프로젝트 소개
     │
@@ -108,7 +103,144 @@ ctest -C Release --test-dir build --verbose
 - **GUI 응답**: 60+ FPS (모던 4패널 인터페이스)
 - **메모리 사용**: <500MB (최적화된 버퍼 관리)
 
+## 320x320 시스템 아키텍처 (간소화 및 최적화)
+
+### 핵심 애플리케이션 플로우 (Phase 2-3 최적화)
+320x320 중심 영역 검출 시스템의 고성능 워크플로우:
+
+1. **초기화**: MainInterface가 4패널 ImGui 인터페이스 생성 (Phase 3)
+2. **320x320 GUI 설정**: ROI 시각화, 검출 결과, 제어판, 성능 대시보드
+3. **CenterRegionCapture**: 화면 중앙 320x320 영역 고속 추출 (<5ms)
+4. **병렬 검출**: HSV 색상 추적 + YOLOv11 객체 검출 (280+ FPS)
+5. **실시간 업데이트**: 60+ FPS GUI로 검출 결과 시각화
+
+### 핵심 아키텍처 패턴 (35% 감축 후)
+
+#### 4패널 모던 GUI (MainInterface - Phase 3)
+- **ROI 시각화 패널**: 320x320 중심 영역 실시간 표시 (1:1 비율)
+- **검출 결과 패널**: HSV 좌표 + YOLO 바운딩 박스 실시간 표시
+- **제어 패널**: 간소화된 설정 (HSV 튜닝, YOLO 임계값)
+- **성능 대시보드**: FPS, 처리 시간, ROI 메트릭 실시간 모니터링
+
+#### 간소화된 직접 인스턴스화 (팩토리 제거)
+- **CenterRegionCapture**: 직접 생성으로 오버헤드 제거
+- **YOLOv11TensorRT**: GPU/CPU 백엔드 자동 전환
+- **HSVColorDetection**: 320x320 최적화된 색상 추적
+- **SimpleMetrics**: 경량 성능 모니터링
+
+#### 핵심 인터페이스 (최소화)
+- **ICaptureDevice**: 화면 캡처 추상화 (ScreenCaptureLiteDevice)
+- **IDetectionAlgorithm**: 검출 알고리즘 통합 (HSV, YOLO)
+- **IPerformanceObserver**: 성능 관찰 (SimpleMetrics)
+
+#### 320x320 특화 설정 시스템 (ConfigManager)
+- **간소화된 JSON**: 320x320 ROI, HSV 범위, YOLO 설정만 유지
+- **실시간 변경**: GUI에서 설정 변경 시 즉시 적용
+- **성능 최적화**: 불필요한 설정 계층 제거
+
+## 320x320 소스 코드 아키텍처 (35% 감축)
+
+### 📁 src/ 디렉토리 구조 (간소화)
+```
+src/
+├── main.cpp                     # 🚀 WinMain 진입점 (Phase 2 최적화)
+├── core/                        # 🔧 핵심 시스템 로직 (간소화)
+│   └── ConfigManager.cpp        # 320x320 특화 JSON 설정 관리
+├── capture/                     # 📹 320x320 특화 캡처 시스템
+│   ├── CenterRegionCapture.cpp  # ✨ 320x320 중심 영역 고속 추출 (<5ms)
+│   └── ScreenCaptureLiteDevice.cpp # 전체 화면 캡처 wrapper
+├── detection/                   # 🔍 고성능 검출 알고리즘 (간소화)
+│   ├── HSVColorDetection.cpp    # HSV 색상 추적 (320x320 최적화)
+│   └── YOLOv11TensorRTInference.cpp # 280+ FPS YOLO 객체 검출
+├── gui/                         # 🖥️ 4패널 모던 GUI (Phase 3)
+│   └── MainInterface.cpp        # 876줄 최적화된 4패널 인터페이스
+└── monitoring/                  # 📊 성능 모니터링 (완료)
+    └── SimpleMetrics.cpp        # 경량 성능 메트릭 (60+ FPS GUI)
+```
+
+**🗑️ 제거된 구성요소 (35% 감축):**
+- ❌ **ColorDetector.cpp** → HSVColorDetection으로 통합
+- ❌ **ObjectDetector.cpp** → YOLOv11로 완전 대체
+- ❌ **factories/ComponentFactory.cpp** → 직접 인스턴스화로 성능 최적화
+- ❌ **복잡한 인터페이스 계층** → 핵심 인터페이스만 유지
+
+### 핵심 모듈 상세 분석
+
+#### 🚀 main.cpp - 320x320 시스템 진입점 (Phase 2 최적화)
+**역할**: 320x320 중심 영역 검출 시스템의 Windows GUI 애플리케이션 초기화
+
+```cpp
+// Phase 2: 320x320 CENTER REGION CAPTURE SYSTEM
+// 고성능 WinMain 기반 GUI 애플리케이션
+// 4패널 ImGui 인터페이스 및 320x320 ROI 초기화
+```
+
+**핵심 책임 (Phase 2 최적화)**:
+- **320x320 시스템 초기화**: WinMain 진입점에서 ROI 시스템 부트스트랩
+- **4패널 GUI 설정**: ImGui 컨텍스트 및 OpenGL 3.3+ 렌더링 초기화
+- **직접 인스턴스화**: MainInterface 직접 생성 (팩토리 패턴 제거)
+- **성능 최적화**: Release 빌드 기준 최적화된 리소스 관리
+
+#### 📹 CenterRegionCapture.cpp - ✨ 320x320 중심 영역 고속 추출 (신규)
+**역할**: 화면 중앙 320x320 픽셀 영역의 초고속 추출 시스템 (<5ms)
+
+**핵심 기능 (Phase 2 완료)**:
+- **<5ms 고속 추출**: 화면 중앙 320x320 영역 초고속 처리
+- **좌표 변환**: ROI 좌표 ↔ 전체 화면 좌표 양방향 변환
+- **메모리 최적화**: 320x320 버퍼 전용 메모리 관리
+- **성능 메트릭**: 추출 시간, 메모리 사용량 실시간 모니터링
+
+#### 🔍 YOLOv11TensorRTInference.cpp - 280+ FPS 객체 검출 (완료)
+**역할**: 320x320 ROI에서 280+ FPS 실시간 YOLOv11 TensorRT 객체 검출
+
+**고성능 특징 (완료)**:
+- **280+ FPS GPU**: TensorRT 엔진 최적화로 실시간 추론
+- **30+ FPS CPU**: CUDA 미지원 환경에서 CPU 백엔드 자동 전환
+- **실시간 결과**: 바운딩 박스, 신뢰도, 클래스명 실시간 GUI 표시
+
+#### 🖥️ MainInterface.cpp - 876줄 최적화된 4패널 인터페이스
+**역할**: 320x320 ROI 시각화 및 검출 결과를 위한 전문 4패널 모던 GUI
+
+**Phase 3 핵심 기능**:
+- **ROI 시각화 패널**: 320x320 중심 영역 실시간 표시 (1:1 비율)
+- **검출 결과 패널**: HSV 좌표 + YOLO 바운딩 박스 실시간 표시
+- **제어 패널**: HSV 튜닝, YOLO 설정, 시작/정지 통합 제어
+- **성능 대시보드**: FPS, 처리 시간, ROI 메트릭 실시간 모니터링
+
 ## Git Submodule 관리 (320x320 최적화)
+
+### 320x320 최적화 외부 의존성 아키텍처
+ScreenMonitor는 **5개의 핵심 Git submodule**을 통해 320x320 중심 영역 검출 시스템에 최적화된 검증된 라이브러리들을 활용합니다.
+
+### 📁 external/ 디렉토리 맵 (Phase 0-3 최적화)
+```
+external/
+├── opencv/                      # 🔍 320x320 ROI 처리 최적화
+│   ├── modules/core/            # Mat, ROI 연산 (320x320 전용)
+│   ├── modules/imgproc/         # 이미지 처리 (HSV 변환, 필터링)
+│   ├── modules/imgcodecs/       # 이미지 코덱 (PNG 저장용)
+│   └── [3개 모듈만 빌드]        # 최소 구성으로 빌드 시간 단축
+│
+├── imgui/                       # 🖥️ 4패널 모던 GUI (Phase 3)
+│   ├── imgui.cpp/.h             # 핵심 GUI 시스템
+│   ├── backends/                # GLFW + OpenGL3 백엔드
+│   ├── imgui_internal.h         # DockBuilder API (4패널 도킹)
+│   └── [docking 브랜치 필수]    # ROI 시각화 패널 지원
+│
+├── googletest/                  # 🧪 320x320 시스템 테스트
+│   ├── googletest/              # CenterRegionCapture 단위 테스트
+│   ├── googlemock/              # Mock 시스템 (HSV, ScreenCapture)
+│   └── [성능 벤치마크 포함]     # 280+ FPS YOLO 검증
+│
+├── nlohmann_json/               # 📄 간소화된 설정 관리
+│   ├── single_include/          # 헤더 전용 (320x320 설정 스키마)
+│   └── [설정 파일 최소화]       # ROI, HSV, YOLO 설정만
+│
+└── screen_capture_lite/         # 📹 고성능 전체 화면 캡처
+    ├── src_cpp/                 # 전체 화면 캡처 (320x320 추출용)
+    ├── include/                 # CenterRegionCapture 연동 API
+    └── [최적화된 버퍼 관리]     # 320x320 전용 메모리 최적화
+```
 
 ### 320x320 시스템 핵심 의존성
 | 모듈 | 320x320 역할 | 최적화 특징 |
@@ -137,6 +269,70 @@ git commit -m "320x320 최적화: opencv 최소화, imgui docking 업데이트"
 # Submodule 문제 해결 (320x320 시스템 재초기화)
 git submodule deinit --all
 git submodule update --init --recursive
+```
+
+## 320x320 테스트 전략 (GoogleTest/Mock 기반)
+
+### 🎯 320x320 테스트 철학
+- **성능 최우선**: 280+ FPS YOLO, <5ms ROI 추출 성능 검증
+- **간소화된 커버리지**: 핵심 모듈 (CenterRegionCapture, YOLOv11, HSV) 90%+ 커버리지
+- **실시간 벤치마킹**: 320x320 시스템 특성에 맞는 실시간 성능 테스트
+- **GPU 테스트**: TensorRT 280+ FPS 및 CPU 백엔드 30+ FPS 검증
+
+### 📊 320x320 테스트 피라미드 구조 (간소화)
+```
+           🔺 E2E Tests (5%)
+          4패널 GUI, 320x320 워크플로우 테스트
+         
+        🔺🔺 Integration Tests (15%)
+       ROI-YOLO-HSV 통합, GPU/CPU 성능 테스트
+      
+    🔺🔺🔺 Unit Tests (80%)
+   CenterRegionCapture, YOLOv11, HSV 개별 테스트
+```
+
+### 📁 tests/ 아키텍처 (Phase 0-3 최적화)
+```
+tests/
+├── test_*.cpp                   # 📋 320x320 특화 단위 테스트
+│   ├── test_ConfigManager.cpp   # 간소화된 설정 관리 테스트
+│   ├── test_CenterRegionCapture.cpp # ✨ 320x320 ROI 추출 테스트 (<5ms 검증)
+│   ├── test_HSVColorDetection.cpp   # HSV 색상 추적 테스트 (320x320 최적화)
+│   ├── test_YOLOv11Integration.cpp  # 280+ FPS YOLO 통합 테스트
+│   ├── test_MainInterface.cpp   # 4패널 GUI 테스트 (Phase 3)
+│   └── test_Performance*.cpp    # 성능 벤치마크 통합 테스트
+│
+├── helpers/                     # 🛠️ 320x320 테스트 유틸리티 (최소화)
+│   ├── ConfigTestHelper.cpp/.h  # 간소화된 설정 테스트 도우미
+│   ├── GLTestContext.cpp/.h     # 4패널 GUI 테스트 컨텍스트
+│   └── TestImageGenerator.cpp/.h # 320x320 테스트 이미지 생성
+│
+├── mocks/                       # 🎭 간소화된 Mock 객체
+│   ├── MockHSVDetector.cpp/.h   # HSV 검출 Mock (간소화)
+│   └── MockScreenCapture.cpp/.h # 화면 캡처 Mock (320x320 특화)
+│
+├── benchmark_tests.cpp          # ⚡ 280+ FPS YOLO 성능 벤치마크
+└── [320x320 테스트 데이터]     # 🗂️ 320x320 테스트 이미지, ROI 설정
+```
+
+### 🚀 320x320 시스템 테스트 실행 방법
+
+#### 로컬 개발 환경 (320x320 최적화)
+```bash
+# 320x320 시스템 전체 테스트 빌드 (Release 필수)
+cmake --build build --config Release --parallel
+
+# 320x320 모든 테스트 실행 (성능 검증 포함)
+ctest -C Release --test-dir build --verbose
+
+# 320x320 핵심 테스트 개별 실행
+./build/bin/tests/test_CenterRegionCapture.exe      # <5ms ROI 추출 테스트
+./build/bin/tests/test_YOLOv11Integration.exe       # 280+ FPS YOLO 테스트
+./build/bin/tests/test_HSVColorDetection.cpp        # HSV 색상 추적 테스트
+./build/bin/tests/test_MainInterface.exe            # 4패널 GUI 테스트 (Phase 3)
+
+# 320x320 성능 벤치마크 실행 (핵심 성능 검증)
+./build/bin/tests/benchmark_320x320_tests.exe       # 280+ FPS, <5ms ROI 검증
 ```
 
 ## 320x320 시스템 개발 워크플로우
@@ -208,14 +404,29 @@ glxinfo | grep "OpenGL version"  # Linux
 # Windows: GPU 드라이버 업데이트
 ```
 
-## 320x320 시스템 전문 가이드
+## 320x320 시스템 개발 가이드라인
 
-320x320 중심 영역 검출 시스템의 각 구성요소에 대한 상세 가이드:
+### 320x320 최적화 코드 스타일
+- **C++17 표준**: 고성능 320x320 처리를 위한 모던 C++ 활용
+- **Windows GUI**: WinMain 기반 4패널 전문 인터페이스
+- **한국어 주석**: 320x320 ROI 처리 로직에 상세한 한국어 설명
+- **정적 링킹**: 단일 EXE 배포를 위한 모든 의존성 정적 연결
+- **성능 우선**: 280+ FPS YOLO, 60+ FPS GUI 성능 기준
 
-- **📖 [ScreenMonitor/CLAUDE.md](ScreenMonitor/CLAUDE.md)** - 320x320 시스템 완전 가이드 (Phase 0-3 통합)
-- **🔧 [ScreenMonitor/src/CLAUDE.md](ScreenMonitor/src/CLAUDE.md)** - 간소화된 아키텍처 및 CenterRegionCapture 개발 가이드
-- **📦 [ScreenMonitor/external/CLAUDE.md](ScreenMonitor/external/CLAUDE.md)** - 최적화된 의존성 관리 및 성능 튜닝 가이드
-- **🧪 [ScreenMonitor/tests/CLAUDE.md](ScreenMonitor/tests/CLAUDE.md)** - 320x320 시스템 테스트 전략 및 성능 벤치마크 가이드
+### 간소화된 개발 패턴
+```cpp
+// 320x320 시스템의 직접 인스턴스화 패턴
+auto centerCapture = std::make_unique<CenterRegionCapture>();
+auto yoloDetector = std::make_unique<YOLOv11TensorRTInference>();
+auto hsvDetector = std::make_unique<HSVColorDetection>();
+
+// 320x320 ROI 추출 및 검출
+cv::Mat roiFrame;
+if (centerCapture->ExtractCenterRegion(fullFrame, roiFrame)) {
+    auto yoloResults = yoloDetector->detect(roiFrame);
+    auto hsvResults = hsvDetector->detect(roiFrame);
+}
+```
 
 ## 320x320 시스템 SuperClaude 통합
 
@@ -246,18 +457,25 @@ glxinfo | grep "OpenGL version"  # Linux
 
 ## 320x320 시스템 상태 및 성숙도 (Phase 0-3 완료)
 
-- **🟢 Production Ready**: 280+ FPS YOLO, 60+ FPS GUI 달성한 고성능 320x320 시스템
+### ✅ **Production Ready 성능**
+- **ROI 추출**: <5ms (320x320 중심 영역)
+- **YOLO 추론**: 280+ FPS (TensorRT GPU), 30+ FPS (CPU 백엔드)
+- **GUI 응답**: 60+ FPS (4패널 모던 인터페이스)
+- **메모리 효율**: <500MB (최적화된 버퍼 관리)
+- **코드 감축**: 35% (7,126줄 → 4,700줄)
+
+### 🟢 완성된 시스템 특징
 - **🟢 완전한 문서화**: Phase 0-3 변환 과정 및 320x320 특화 가이드 완비
-- **🟢 35% 코드 감축**: 7,126줄 → 4,700줄로 아키텍처 최적화 완료
 - **🟢 전문 GUI**: ImGui 4패널 모던 인터페이스 (ROI 시각화, 검출 결과, 제어, 성능)
 - **🟢 YOLOv11 TensorRT**: 완전 구현된 280+ FPS 객체 검출 (GPU/CPU 자동 전환)
+- **🟢 간소화된 아키텍처**: 팩토리 패턴 제거로 직접 인스턴스화 성능 향상
 
 ## 320x320 시스템 기여 및 협업
 
-새로운 개발자를 위한 320x320 시스템 진입 경로:
-1. **320x320 시스템 이해**: 이 CLAUDE.md → ScreenMonitor/CLAUDE.md 순서로 Phase 0-3 변환 학습
+### 새로운 개발자를 위한 320x320 시스템 진입 경로
+1. **320x320 시스템 이해**: 이 CLAUDE.md 전체 가이드 학습
 2. **고성능 환경 설정**: Git submodule → CMake Release 빌드 → 성능 벤치마크 확인
-3. **간소화된 코드 탐색**: src/CLAUDE.md를 통한 CenterRegionCapture, YOLOv11 모듈 학습
+3. **간소화된 코드 탐색**: src/ 구조를 통한 CenterRegionCapture, YOLOv11 모듈 학습
 4. **320x320 기능 개발**: 직접 인스턴스화 패턴으로 확장 및 성능 테스트 작성
 
 ### 320x320 시스템 성능 기준
@@ -266,6 +484,12 @@ glxinfo | grep "OpenGL version"  # Linux
 - **YOLO 추론**: 280+ FPS (TensorRT), 30+ FPS (CPU)
 - **GUI 응답**: 60+ FPS (4패널 인터페이스)
 - **메모리 효율**: <500MB (최적화된 버퍼)
+
+### Phase 0-3 변환 요약
+- **Phase 0**: 전체 분석 및 외부 연구 완료
+- **Phase 1**: 35% 코드 감축, 아키텍처 간소화
+- **Phase 2**: 320x320 중심 캡처 + YOLOv11 TensorRT 완료
+- **Phase 3**: 4패널 모던 GUI, 876줄 최적화 완료
 
 ---
 

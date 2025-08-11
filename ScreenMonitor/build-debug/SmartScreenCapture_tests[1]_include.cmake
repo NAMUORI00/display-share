@@ -1,5 +1,0 @@
-if(EXISTS "C:/Users/yskim/project/C_capture/ScreenMonitor/build-debug/SmartScreenCapture_tests[1]_tests.cmake")
-  include("C:/Users/yskim/project/C_capture/ScreenMonitor/build-debug/SmartScreenCapture_tests[1]_tests.cmake")
-else()
-  add_test(SmartScreenCapture_tests_NOT_BUILT SmartScreenCapture_tests_NOT_BUILT)
-endif()

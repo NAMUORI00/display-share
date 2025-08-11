@@ -1,4 +1,18 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.28...3.30)
+
+# Adopt newer policies explicitly when available (incrementally add as needed)
+if(POLICY CMP0177)
+    # Normalize install() DESTINATION paths (suppresses related dev warning)
+    cmake_policy(SET CMP0177 NEW)
+endif()
+
+# Fallback: 만약 하위 서브프로젝트 재설정으로 CMP0177 미설정 경고 발생 시 해당 경고 자체를 억제
+# (정책 동작은 위에서 NEW로 지정, 단지 "not set" 경고만 제거)
+set(CMAKE_POLICY_WARNING_CMP0177 OFF CACHE BOOL "Suppress policy CMP0177 not-set warnings" FORCE)
+
+# In case any deprecated features are still referenced by vendor packages, turn warnings off optionally.
+# Comment out the next line if you prefer to see deprecation notices from vendored CMakeLists.
+set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "Suppress deprecated CMake feature warnings for clean configure output" FORCE)
 
 # Submodule-based dependency management
 # No vcpkg required - all dependencies managed as git submodules
@@ -8,6 +22,11 @@ project(SmartScreenCapture VERSION 1.0.0 LANGUAGES CXX)
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Ensure MSVC treats sources as UTF-8 to suppress C4819 (character set) warnings
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 # Define preprocessor directives (UNICODE disabled for OpenCV compatibility)
 add_compile_definitions(WIN32_LEAN_AND_MEAN)
@@ -103,6 +122,16 @@ message(STATUS "  - AI 모듈: DNN (YOLO v11 지원)")
 message(STATUS "  - 임시 비활성화: videoio (Windows GUID_NULL 에러)")
 message(STATUS "  - 비활성화된 모듈: highgui, features2d, calib3d, flann, ml, photo (Windows 호환성)")
 
+# Override OpenCV's internal minimal CMake version.
+# 이유: OpenCV 최상위 CMakeLists.txt 내부에서 별도 cmake_minimum_required(${MIN_VER_CMAKE}) 호출 시
+# 해당 버전 이후 도입된 정책(CMP0177 등)은 "unset" 상태가 되어 install()에서 dev 경고가 발생.
+# 3.28 이상으로 올리면 OpenCV 내부 호출이 CMP0177을 NEW로 자동 설정하여 경고 제거.
+set(MIN_VER_CMAKE 3.28 CACHE STRING "Override OpenCV's minimum required CMake version (enables CMP0177)" FORCE)
+
+# 서브모듈 수정 없이 CMP0177 기본값을 NEW로 강제 (정책 미설정 경고 방지)
+if(NOT DEFINED CMAKE_POLICY_DEFAULT_CMP0177)
+    set(CMAKE_POLICY_DEFAULT_CMP0177 NEW)
+endif()
 add_subdirectory(external/opencv)
 
 # Set OpenCV include directories (source + generated)
@@ -145,32 +174,37 @@ message(STATUS "ImGui GUI fully enabled with GLFW + OpenGL3")
 # MAIN APPLICATION
 # =============================================================================
 
-# Smart Screen Capture Application - Cleaned up version
+# Build mode options
+option(SC_RUN_PERF_TEST "Run performance test (instead of GUI loop)" OFF)
+option(SC_FORCE_CONSOLE "Force console subsystem" OFF)
+
+# Smart Screen Capture Application - Phase 2 GUI version
 add_executable(${PROJECT_NAME}
-    # Core system files (simplified for Phase 1 cleanup)
-    src/main_cleanup_test.cpp
+    # Entry point (GUI / performance test selectable via SC_RUN_PERF_TEST)
+    src/main.cpp
+
+    # Core system files
     src/core/ConfigManager.cpp
-    
-    # Detection algorithms (cleaned and simplified)
+
+    # Detection algorithms
     src/detection/HSVColorDetection.cpp
-    src/detection/YOLOv11TensorRTInference.cpp  # DNN 모듈 활성화로 다시 포함
-    
-    # Simple monitoring system
+    src/detection/YOLOv11TensorRTInference.cpp
+
+    # Monitoring
     src/monitoring/SimpleMetrics.cpp
-    
-    
-    # GUI interface (temporarily disabled for Phase 2 testing)
-    # src/gui/MainInterface.cpp
-    
+
+    # GUI interface (enabled for persistent application)
+    src/gui/MainInterface.cpp
+
     # Capture implementation
     src/capture/ScreenCaptureLiteDevice.cpp
     src/capture/CenterRegionCapture.cpp
 )
 
 # Set as console application for Phase 1 cleanup test
-set_target_properties(${PROJECT_NAME}
-    PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE"
-)
+if(SC_FORCE_CONSOLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+endif()
 
 # ScreenCaptureLiteDevice.cpp는 완전히 구현되어 src/capture/ 디렉토리에 위치
 
@@ -181,6 +215,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     include/capture/
     include/detection/
     include/gui/
+    src/gui/
     include/interfaces/
     include/factories/
     external/screen_capture_lite/include
@@ -245,6 +280,9 @@ endif()
 
 # GUI 기능 활성화 매크로 정의
 target_compile_definitions(${PROJECT_NAME} PRIVATE GUI_ENABLED=1)
+if(SC_RUN_PERF_TEST)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE RUN_PERFORMANCE_TEST=1)
+endif()
 message(STATUS "GUI_ENABLED 매크로 정의됨 - GUI 기능 완전 활성화")
 
 # Compiler definitions for ImGui OpenGL3 backend
@@ -257,11 +295,15 @@ endif()
 # TESTING CONFIGURATION (Simplified)
 # =============================================================================
 
-# Enable testing
-enable_testing()
-include(GoogleTest)
+# Test build toggle
+option(SC_ENABLE_TESTS "Build and discover GoogleTest tests" ON)
+if(SC_ENABLE_TESTS)
+    enable_testing()
+    include(GoogleTest)
+endif()
 
 # Create a static library for testing (without main.cpp)
+if(SC_ENABLE_TESTS)
 add_library(${PROJECT_NAME}_lib STATIC
     # Core system files
     src/core/ConfigManager.cpp
@@ -289,6 +331,7 @@ target_include_directories(${PROJECT_NAME}_lib PUBLIC
     include/capture/
     include/detection/
     include/gui/
+    src/gui/
     include/interfaces/
     include/factories/
     external/screen_capture_lite/include
@@ -310,11 +353,11 @@ target_link_libraries(${PROJECT_NAME}_lib PUBLIC
 )
 
 # Apply same compiler definitions to library
-if(WIN32)
+if(SC_ENABLE_TESTS AND WIN32)
     target_compile_definitions(${PROJECT_NAME}_lib PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(SC_ENABLE_TESTS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(${PROJECT_NAME}_lib PRIVATE _DEBUG)
 else()
     target_compile_definitions(${PROJECT_NAME}_lib PRIVATE NDEBUG)
@@ -323,7 +366,7 @@ endif()
 # GUI 기능 활성화 매크로 정의 (라이브러리)
 target_compile_definitions(${PROJECT_NAME}_lib PRIVATE GUI_ENABLED=1)
 
-if(NOT WIN32)
+if(SC_ENABLE_TESTS AND NOT WIN32)
     target_compile_definitions(${PROJECT_NAME}_lib PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
 endif()
 
@@ -374,12 +417,13 @@ endif()
 
 # Discover tests
 include(GoogleTest)
-gtest_discover_tests(${PROJECT_NAME}_tests)
+gtest_discover_tests(${PROJECT_NAME}_tests DISCOVERY_MODE PRE_TEST)
 
 # Set output directory for test executables
 set_target_properties(${PROJECT_NAME}_tests
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
 )
+endif() # SC_ENABLE_TESTS
 
 message(STATUS "=== SmartScreenCapture Configuration Complete ===")
 message(STATUS "GUI: Fully Enabled (GLFW + ImGui + OpenGL3)")
