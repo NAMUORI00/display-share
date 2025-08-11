@@ -458,16 +458,51 @@ void MainInterface::RenderControlPanel() {
         ImGui::PopStyleColor();
         ImGui::Separator();
 
-        // 메인 제어
+        // 모니터 목록 새로고침
+        if (ImGui::Button("🔄 Refresh Monitors")) {
+            RefreshMonitorList();
+        }
+        if (!m_monitors.empty()) {
+            std::string currentLabel;
+            if (m_selectedMonitor < static_cast<int>(m_monitors.size())) {
+                const auto& mon = m_monitors[m_selectedMonitor];
+                currentLabel = std::to_string(mon.index) + ": " + mon.name;
+            } else {
+                currentLabel = "Select Monitor";
+            }
+            if (ImGui::BeginCombo("Monitor", currentLabel.c_str())) {
+                for (int i = 0; i < static_cast<int>(m_monitors.size()); ++i) {
+                    bool selected = (i == m_selectedMonitor);
+                    const auto& mon = m_monitors[i];
+                    std::string label = std::to_string(mon.index) + ": " + mon.name + " (" + std::to_string(mon.width) + "x" + std::to_string(mon.height) + ")";
+                    if (ImGui::Selectable(label.c_str(), selected)) {
+                        m_selectedMonitor = i;
+                        if (m_captureEnabled) {
+                            StopCapture();
+                            StartCapture(mon.index);
+                        }
+                    }
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+        } else {
+            ImGui::TextDisabled("No monitors detected");
+        }
+
+        bool canStart = !m_captureEnabled && !m_monitors.empty();
+        if (!canStart) ImGui::BeginDisabled(true);
         if (ImGui::Button(m_captureEnabled ? "🛑 Stop Capture" : "▶️ Start Capture", ImVec2(-1, 40))) {
             if (!m_captureEnabled) {
-                if (!StartCapture(0)) {
+                int monIndex = (m_selectedMonitor < static_cast<int>(m_monitors.size())) ? m_monitors[m_selectedMonitor].index : 0;
+                if (!StartCapture(monIndex)) {
                     AddLogMessage("Failed to start capture", 2);
                 }
             } else {
                 StopCapture();
             }
         }
+        if (!canStart) ImGui::EndDisabled();
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -836,8 +871,14 @@ bool MainInterface::StartCapture(int monitorIndex) {
         if (!m_captureDevice) {
             m_captureDevice = std::make_unique<ScreenCaptureLiteDevice>();
         }
-    ICaptureDevice::CaptureSettings settings; // 기본 캡처 설정 구조체
-    settings.target_fps = static_cast<int>(m_targetFPS);
+        if (m_monitors.empty()) {
+            RefreshMonitorList();
+        }
+        if (monitorIndex >= static_cast<int>(m_monitors.size())) {
+            monitorIndex = 0;
+        }
+        ICaptureDevice::CaptureSettings settings;
+        settings.target_fps = static_cast<int>(m_targetFPS);
         if (!m_captureDevice->Initialize(settings)) {
             AddLogMessage("Capture device init failed", 2);
             return false;
@@ -849,10 +890,10 @@ bool MainInterface::StartCapture(int monitorIndex) {
         }
         m_captureEnabled = true;
         m_lastFrameTime = std::chrono::steady_clock::now();
-        AddLogMessage("Capture started", 0);
+        AddLogMessage("Capture started (monitor index: " + std::to_string(monitorIndex) + ")", 0);
         return true;
     } catch (const std::exception& e) {
-        AddLogMessage(std::string("Capture start exception: ")+e.what(), 2);
+        AddLogMessage(std::string("Capture start exception: ") + e.what(), 2);
         return false;
     }
 }
@@ -872,18 +913,11 @@ void MainInterface::PollCaptureFrame() {
     if (!m_captureEnabled || !m_captureDevice) return;
     cv::Mat full, roi;
     if (m_captureDevice->CaptureFrame(full)) {
-        // 전체 프레임 필요 시: UpdateFrame(full);
         if (m_captureDevice->GetCenterRegion(roi) && !roi.empty()) {
-            // RegionInfo 계산 (ScreenCaptureLiteDevice 내부 변환 미사용하므로 CenterRegionCapture 로 재계산)
-            CenterRegionCapture::RegionInfo info;
-            info.width = CenterRegionCapture::TARGET_WIDTH;
-            info.height = CenterRegionCapture::TARGET_HEIGHT;
-            info.source_width = full.cols;
-            info.source_height = full.rows;
-            info.x = (full.cols - info.width)/2;
-            info.y = (full.rows - info.height)/2;
-            info.scale_x = 1.0; info.scale_y = 1.0;
-            UpdateROIFrame(roi, info);
+            if (m_centerCapture) {
+                m_regionInfo = m_centerCapture->CalculateRegionInfo(full.cols, full.rows);
+            }
+            UpdateROIFrame(roi, m_regionInfo);
             auto now = std::chrono::steady_clock::now();
             double dt = std::chrono::duration<double>(now - m_lastFrameTime).count();
             if (dt > 0) {
@@ -891,6 +925,21 @@ void MainInterface::PollCaptureFrame() {
                 UpdateFPS(static_cast<float>(fps));
             }
             m_lastFrameTime = now;
+        }
+    }
+}
+
+void MainInterface::RefreshMonitorList() {
+    m_monitors.clear();
+    if (m_captureDevice) {
+        m_monitors = m_captureDevice->GetAvailableMonitors();
+        if (m_monitors.empty()) {
+            AddLogMessage("No monitors detected", 1);
+        } else {
+            AddLogMessage("Monitors refreshed: " + std::to_string(m_monitors.size()), 0);
+            if (m_selectedMonitor >= static_cast<int>(m_monitors.size())) {
+                m_selectedMonitor = 0;
+            }
         }
     }
 }
