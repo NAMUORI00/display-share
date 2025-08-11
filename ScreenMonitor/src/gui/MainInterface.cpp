@@ -167,8 +167,14 @@ bool MainInterface::Initialize() {
 
     m_initialized = true;
     std::cout << "Modern 320x320 ROI GUI System initialized successfully!" << std::endl;
-    // 자동 캡처 시작을 원하면 다음 줄을 활성화
-    StartCapture(0);  // 기본 모니터에서 실시간 캡처 시작
+    // 모니터 목록 초기화 후 자동 캡처 시작
+    RefreshMonitorList();
+    if (!m_monitors.empty()) {
+        int monitorIndex = (m_selectedMonitor < static_cast<int>(m_monitors.size())) 
+            ? m_monitors[m_selectedMonitor].index : m_monitors[0].index;
+        StartCapture(monitorIndex);  // 선택된 모니터에서 실시간 캡처 시작
+        AddLogMessage("Auto-started capture on monitor: " + std::to_string(monitorIndex), 0);
+    }
     
     return true;
 #else
@@ -358,6 +364,21 @@ void MainInterface::RenderROIVisualizationPanel() {
             ImGui::Text("  Position: (%d, %d)", m_regionInfo.x, m_regionInfo.y);
             ImGui::Text("  Size: %dx%d", m_regionInfo.width, m_regionInfo.height);
             ImGui::Text("  Source: %dx%d", m_regionInfo.source_width, m_regionInfo.source_height);
+            
+            // 현재 캡처 중인 모니터 정보 표시
+            ImGui::Spacing();
+            if (m_captureEnabled && m_selectedMonitor < static_cast<int>(m_monitors.size())) {
+                const auto& mon = m_monitors[m_selectedMonitor];
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.2f, 1.0f));
+                ImGui::Text("📺 Active Monitor: %s", mon.name.c_str());
+                ImGui::Text("   Resolution: %dx%d", mon.width, mon.height);
+                ImGui::Text("   Position: (%d, %d)", mon.x, mon.y);
+                ImGui::PopStyleColor();
+            } else if (!m_captureEnabled) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
+                ImGui::Text("⏸️ Capture Stopped");
+                ImGui::PopStyleColor();
+            }
             
         } else {
             // 프레임이 없을 때 플레이스홀더
