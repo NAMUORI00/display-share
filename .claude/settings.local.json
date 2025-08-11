@@ -73,7 +73,8 @@
       "mcp__context7__resolve-library-id",
       "mcp__context7__get-library-docs",
       "Bash(timeout 60 cmake -B build-test -S . -DCMAKE_BUILD_TYPE=Release)",
-      "Bash(timeout 120 cmake --build build-test --config Release --parallel 4)"
+      "Bash(timeout 120 cmake --build build-test --config Release --parallel 4)",
+      "Bash(./build/bin/Release/SmartScreenCapture.exe)"
     ],
     "deny": []
   }

@@ -15,11 +15,23 @@
 #include <imgui_internal.h>
 
 #if GUI_ENABLED
+    // Windows 헤더를 먼저 포함하여 GLFW에서 재정의 경고(APIENTRY 등) 최소화
+    #ifdef _WIN32
+        #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+        #endif
+        #ifndef NOMINMAX
+        #define NOMINMAX
+        #endif
+        #include <windows.h>
+    #endif
+
 // ImGui with full backend support
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <GLFW/glfw3.h>
 
+// OpenGL types
 #ifdef _WIN32
 #include <GL/gl.h>
 // Windows OpenGL 확장 상수 정의
@@ -156,7 +168,7 @@ bool MainInterface::Initialize() {
     m_initialized = true;
     std::cout << "Modern 320x320 ROI GUI System initialized successfully!" << std::endl;
     // 자동 캡처 시작을 원하면 다음 줄을 활성화
-    // StartCapture(0);
+    StartCapture(0);  // 기본 모니터에서 실시간 캡처 시작
     
     return true;
 #else
@@ -917,7 +929,26 @@ void MainInterface::PollCaptureFrame() {
             if (m_centerCapture) {
                 m_regionInfo = m_centerCapture->CalculateRegionInfo(full.cols, full.rows);
             }
+            
+            // ROI 프레임 업데이트 (실시간 GUI 표시)
             UpdateROIFrame(roi, m_regionInfo);
+            
+            // HSV 색상 검출 실행 (옵션)
+            if (m_hsvEnabled && !roi.empty()) {
+                std::vector<cv::Point> hsv_points;
+                PerformHSVDetection(roi, hsv_points);
+                UpdateHSVDetections(hsv_points);
+            }
+            
+            // YOLO 객체 검출 실행 (옵션)  
+            if (m_yoloEnabled && m_yolov11Enabled && !roi.empty()) {
+                std::vector<cv::Rect> yolo_boxes;
+                std::vector<float> yolo_confs;
+                std::vector<std::string> yolo_names;
+                PerformYOLODetection(roi, yolo_boxes, yolo_confs, yolo_names);
+                UpdateYOLODetections(yolo_boxes, yolo_confs, yolo_names);
+            }
+            
             auto now = std::chrono::steady_clock::now();
             double dt = std::chrono::duration<double>(now - m_lastFrameTime).count();
             if (dt > 0) {
@@ -1003,6 +1034,74 @@ void MainInterface::SetupStreamRedirection() {
 
 void MainInterface::CleanupStreamRedirection() {
     // 스트림 리다이렉션 정리
+}
+
+// 검출 헬퍼 함수 구현
+void MainInterface::PerformHSVDetection(const cv::Mat& roi, std::vector<cv::Point>& detections) {
+    if (roi.empty()) return;
+    
+    detections.clear();
+    
+    try {
+        // HSV 변환
+        cv::Mat hsv;
+        cv::cvtColor(roi, hsv, cv::COLOR_BGR2HSV);
+        
+        // HSV 범위로 마스크 생성
+        cv::Scalar lower(m_hsvLower[0], m_hsvLower[1], m_hsvLower[2]);
+        cv::Scalar upper(m_hsvUpper[0], m_hsvUpper[1], m_hsvUpper[2]);
+        cv::Mat mask;
+        cv::inRange(hsv, lower, upper, mask);
+        
+        // 노이즈 제거를 위한 모폴로지 연산
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+        cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+        cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+        
+        // 컨투어 찾기
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        
+        // 각 컨투어의 중심점 계산
+        for (const auto& contour : contours) {
+            double area = cv::contourArea(contour);
+            if (area > 100 && area < 10000) { // 적절한 크기의 객체만
+                cv::Moments moments = cv::moments(contour);
+                if (moments.m00 != 0) {
+                    cv::Point center(
+                        static_cast<int>(moments.m10 / moments.m00),
+                        static_cast<int>(moments.m01 / moments.m00)
+                    );
+                    detections.push_back(center);
+                }
+            }
+        }
+    } catch (const cv::Exception& e) {
+        AddLogMessage("HSV Detection error: " + std::string(e.what()), 2);
+    }
+}
+
+void MainInterface::PerformYOLODetection(const cv::Mat& roi, std::vector<cv::Rect>& boxes, 
+                                          std::vector<float>& confidences, std::vector<std::string>& class_names) {
+    // YOLO 검출은 현재 플레이스홀더 구현
+    // 실제 TensorRT YOLO 엔진이 구현되면 교체 예정
+    boxes.clear();
+    confidences.clear();
+    class_names.clear();
+    
+    // 데모 목적으로 랜덤 검출 박스 생성 (실제로는 YOLO 추론 결과)
+    if (!roi.empty() && roi.cols >= 320 && roi.rows >= 320) {
+        // 예시: 중앙에 임의의 검출 박스 생성 (테스트용)
+        static int frame_count = 0;
+        frame_count++;
+        
+        if (frame_count % 30 == 0) { // 30프레임마다 한 번씩 검출
+            cv::Rect demo_box(roi.cols/4, roi.rows/4, roi.cols/2, roi.rows/2);
+            boxes.push_back(demo_box);
+            confidences.push_back(0.85f);
+            class_names.push_back("demo_object");
+        }
+    }
 }
 
 // GuiStreamBuf 구현
