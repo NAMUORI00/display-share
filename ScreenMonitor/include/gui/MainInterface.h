@@ -11,6 +11,7 @@
 #include "capture/CenterRegionCapture.h"
 #include "monitoring/SimpleMetrics.h"
 #include "capture/ScreenCaptureLiteDevice.h"
+#include <imgui.h>
  
 // Conditional GUI compilation
 #ifndef DISABLE_GUI
@@ -192,12 +193,18 @@ private:
     void RenderDetectionResultsPanel();      // 검출 결과 표시 패널
     void RenderPerformanceDashboard();       // 성능 모니터링 대시보드
     void RenderControlPanel();               // 간소화된 제어 패널
+    void RenderLogConsolePanel();            // 로그 콘솔 패널 (필터/검색)
     void RenderStatusBar();
     void RenderAboutDialog();
+    void RenderHelpOverlay();                // 온보딩/단축키 오버레이
     
     // 현대화된 GUI 스타일링
     void ApplyModernTheme();
     void RenderDetectionOverlay(const cv::Mat& frame);
+    void InitFonts();                        // 폰트/아이콘 초기화
+    void InitTheme();                        // 개선된 테마 초기화
+    void DrawMetricCard(const char* id, const char* label, const std::string& value, unsigned int bg, unsigned int border);
+    void DrawHSVRangePreview();              // HSV 범위 프리뷰 바
 
     // 설정 관리 헬퍼
     void SaveConfiguration();
@@ -247,6 +254,7 @@ private:
     bool m_showAboutDialog = false;
     bool m_showROIOverlay = true;    // ROI 오버레이 표시
     bool m_showDetectionStats = true; // 검출 통계 표시
+    bool m_showHelpOverlay = true;    // 첫 실행 도움말
     
     // HSV 설정
     int m_hsvLower[3] = {140, 120, 180};
@@ -274,6 +282,10 @@ private:
     std::vector<LogEntry> m_logMessages;
     bool m_autoScrollConsole = true;
     static constexpr size_t MAX_LOG_ENTRIES = 1000;
+    bool m_logFilterInfo = true;
+    bool m_logFilterWarn = true;
+    bool m_logFilterError = true;
+    char m_logSearch[128] = {0};
     
     // 스트림 리다이렉션
     std::unique_ptr<GuiStreamBuf> m_coutRedirect;
