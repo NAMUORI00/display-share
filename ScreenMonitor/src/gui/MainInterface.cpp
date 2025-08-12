@@ -142,8 +142,9 @@ bool MainInterface::Initialize() {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;    // 도킹 활성화
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;  // 멀티 뷰포트 활성화
 
-    // 현대적인 테마 적용
-    ApplyModernTheme();
+    // 폰트 & 테마 초기화
+    InitFonts();
+    InitTheme();
 
     // 백엔드 초기화
     if (!ImGui_ImplGlfw_InitForOpenGL(m_window, true)) {
@@ -289,6 +290,8 @@ void MainInterface::Render() {
     RenderDetectionResultsPanel();    // 검출 결과 표시
     RenderControlPanel();             // 간소화된 제어
     RenderPerformanceDashboard();     // 성능 모니터링
+    RenderLogConsolePanel();          // 로그 콘솔
+    RenderHelpOverlay();              // 온보딩/단축키
 
     // 프레임 렌더링 후 캡처 프레임 폴링 (UI 이벤트와 분리)
     PollCaptureFrame();
@@ -596,7 +599,7 @@ void MainInterface::RenderPerformanceDashboard() {
         ImGui::Separator();
 
         // 실시간 메트릭 표시
-        if (m_metrics) {
+    if (m_metrics) {
             const double current_fps = m_metrics->getCurrentFPS();
             const double process_time = m_metrics->getCurrentProcessTime();
             
@@ -607,11 +610,21 @@ void MainInterface::RenderPerformanceDashboard() {
                                ImVec4(1.0f, 0.8f, 0.2f, 1.0f) :   // 노랑: 보통
                                ImVec4(1.0f, 0.3f, 0.2f, 1.0f);    // 빨강: 나쁨
             
-            ImGui::PushStyleColor(ImGuiCol_Text, fps_color);
-            ImGui::Text("FPS: %.1f / %.0f", current_fps, m_targetFPS);
-            ImGui::PopStyleColor();
-            
-            ImGui::Text("Process Time: %.2f ms", process_time);
+            // 카드 레이아웃 시작
+            ImGui::BeginGroup();
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8,8));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImU32 bg = IM_COL32(32,34,36,255);
+            const ImU32 accGood = IM_COL32(40,180,90,255);
+            const ImU32 accWarn = IM_COL32(210,170,50,255);
+            const ImU32 accBad  = IM_COL32(210,60,40,255);
+            const ImU32 fpsBorder = (current_fps >= m_targetFPS*0.9f)?accGood:(current_fps>=m_targetFPS*0.7f?accWarn:accBad);
+            DrawMetricCard("fps_card","FPS", (std::ostringstream() << std::fixed << std::setprecision(1) << current_fps << "/" << (int)m_targetFPS).str(), bg, fpsBorder);
+            DrawMetricCard("proc_card","Proc ms", (std::ostringstream() << std::fixed << std::setprecision(2) << process_time).str(), bg, IM_COL32(70,130,200,255));
+            DrawMetricCard("hsv_pts","HSV Points", std::to_string(m_hsvDetections.size()), bg, IM_COL32(80,200,120,255));
+            DrawMetricCard("yolo_objs","YOLO Objs", std::to_string(m_yoloDetections.size()), bg, IM_COL32(200,140,80,255));
+            ImGui::PopStyleVar();
+            ImGui::EndGroup();
             
             // FPS 그래프
             if (ImGui::CollapsingHeader("FPS History", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -822,6 +835,129 @@ void MainInterface::RenderAboutDialog() {
         ImGui::Text("Built with OpenCV, ImGui, and TensorRT");
     }
     ImGui::End();
+#endif
+}
+
+// ================== 신규: 로그 콘솔 패널 ==================
+void MainInterface::RenderLogConsolePanel() {
+#if GUI_ENABLED
+    if (ImGui::Begin("Log Console")) {
+        // 필터 영역
+        ImGui::Checkbox("Info", &m_logFilterInfo); ImGui::SameLine();
+        ImGui::Checkbox("Warn", &m_logFilterWarn); ImGui::SameLine();
+        ImGui::Checkbox("Error", &m_logFilterError);
+        ImGui::SetNextItemWidth(180);
+        ImGui::InputTextWithHint("##logsearch","Search...", m_logSearch, sizeof(m_logSearch));
+        ImGui::SameLine();
+        ImGui::Checkbox("AutoScroll", &m_autoScrollConsole);
+        ImGui::Separator();
+
+        ImGui::BeginChild("LogScroll", ImVec2(0,0), false, ImGuiWindowFlags_HorizontalScrollbar);
+        for (const auto& e : m_logMessages) {
+            if ((e.level==0 && !m_logFilterInfo) || (e.level==1 && !m_logFilterWarn) || (e.level==2 && !m_logFilterError)) continue;
+            if (m_logSearch[0] != '\0') {
+                if (e.message.find(m_logSearch) == std::string::npos) continue;
+            }
+            ImVec4 col = (e.level==0)?ImVec4(0.85f,0.85f,0.85f,1.f):(e.level==1?ImVec4(1.f,0.85f,0.3f,1.f):ImVec4(1.f,0.4f,0.3f,1.f));
+            ImGui::PushStyleColor(ImGuiCol_Text, col);
+            ImGui::TextUnformatted(e.message.c_str());
+            ImGui::PopStyleColor();
+        }
+        if (m_autoScrollConsole && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+            ImGui::SetScrollHereY(1.0f);
+        ImGui::EndChild();
+    }
+    ImGui::End();
+#endif
+}
+
+// ================== 신규: 도움말/단축키 오버레이 ==================
+void MainInterface::RenderHelpOverlay() {
+#if GUI_ENABLED
+    if (!m_showHelpOverlay) return;
+    const float PAD = 10.0f;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImVec2 pos = ImVec2(vp->Pos.x + vp->Size.x - 360.0f - PAD, vp->Pos.y + PAD);
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    if (ImGui::Begin("QuickHelp", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
+        ImGui::Text("Shortcuts & Tips");
+        ImGui::Separator();
+        ImGui::Text("Ctrl+S : Start Capture");
+        ImGui::Text("Ctrl+Q : Stop Capture");
+        ImGui::Text("F1 : Toggle Help Overlay");
+        ImGui::Text("Use Docking to rearrange panels");
+        if (ImGui::Button("Hide")) m_showHelpOverlay = false;
+    }
+    ImGui::End();
+#endif
+}
+
+// ================== 신규: 폰트/테마 & 유틸 ==================
+void MainInterface::InitFonts() {
+#if GUI_ENABLED
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    ImFontConfig cfg; cfg.OversampleH = 2; cfg.OversampleV = 2; cfg.PixelSnapH = true;
+    // 기본 한글 폰트 (없는 경우 fallback - 예외 처리 생략)
+    io.Fonts->AddFontDefault();
+    io.FontDefault = io.Fonts->Fonts.back();
+#endif
+}
+
+void MainInterface::InitTheme() {
+#if GUI_ENABLED
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 6.f; style.FrameRounding = 6.f; style.GrabRounding = 5.f; style.TabRounding = 5.f;
+    style.ItemSpacing = ImVec2(8,6); style.FramePadding = ImVec2(10,6);
+    auto& colors = style.Colors;
+    colors[ImGuiCol_WindowBg] = ImVec4(0.10f,0.11f,0.13f,0.98f);
+    colors[ImGuiCol_TitleBgActive] = ImVec4(0.16f,0.36f,0.55f,1.00f);
+    colors[ImGuiCol_Button] = ImVec4(0.20f,0.45f,0.70f,0.85f);
+    colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f,0.55f,0.85f,0.90f);
+    colors[ImGuiCol_ButtonActive] = ImVec4(0.18f,0.42f,0.65f,1.00f);
+    colors[ImGuiCol_Header] = ImVec4(0.19f,0.42f,0.66f,0.80f);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(0.25f,0.50f,0.80f,0.90f);
+    colors[ImGuiCol_HeaderActive] = ImVec4(0.18f,0.42f,0.65f,1.00f);
+#endif
+}
+
+void MainInterface::DrawMetricCard(const char* id, const char* label, const std::string& value, unsigned int bg, unsigned int border) {
+#if GUI_ENABLED
+    ImGui::PushID(id);
+    ImVec2 size(140,72);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImVec2 p2(p.x + size.x, p.y + size.y);
+    dl->AddRectFilled(p, p2, bg, 8.f);
+    dl->AddRect(p, p2, border, 8.f, 0, 2.f);
+    ImGui::InvisibleButton("metric_btn", size);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + 10, p.y + 8));
+    ImGui::TextUnformatted(label);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + 10, p.y + 36));
+    ImGui::TextColored(ImVec4(0.95f,0.97f,1.f,1.f), "%s", value.c_str());
+    ImGui::SameLine();
+    ImGui::PopID();
+    ImGui::SameLine();
+#endif
+}
+
+void MainInterface::DrawHSVRangePreview() {
+#if GUI_ENABLED
+    ImVec2 start = ImGui::GetCursorScreenPos();
+    ImVec2 size(ImGui::GetContentRegionAvail().x, 18);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    int hMin=m_hsvLower[0], hMax=m_hsvUpper[0];
+    const int total = 179;
+    for(int h=hMin; h<=hMax; ++h){
+        float t0 = (float)(h - hMin)/(float)std::max(1,(hMax-hMin));
+        ImU32 col = ImColor::HSV(h/179.f,1.f,1.f);
+        float x0 = start.x + t0 * size.x;
+        float x1 = start.x + ((float)(h - hMin + 1)/(float)std::max(1,(hMax-hMin))) * size.x;
+        dl->AddRectFilled(ImVec2(x0,start.y), ImVec2(x1,start.y+size.y), col);
+    }
+    dl->AddRect(start, ImVec2(start.x + size.x, start.y + size.y), IM_COL32(255,255,255,180), 3.f, 0, 1.5f);
+    ImGui::Dummy(size);
 #endif
 }
 

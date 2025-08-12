@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-test/
 out/
 Debug/
 Release/
@@ -9,6 +10,9 @@ MinSizeRel/
 # Visual Studio Code
 .vscode/
 *.code-workspace
+
+# ImGui runtime layout/state file
+imgui.ini
 
 # CMake
 CMakeCache.txt
@@ -90,6 +94,15 @@ Thumbs.db
 *.sdf
 *.VC.db
 *.VC.opendb
+
+# Local generated solution files (keep if manually curated)
+*.sln
+
+# CMake generated per-config directories
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
 
 # Configuration files that might contain sensitive info
 config/secrets.json
