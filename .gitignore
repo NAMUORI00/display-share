@@ -1,5 +1,6 @@
 # Build directories
 build/
+ScreenMonitor/build-*/
 build-test/
 out/
 Debug/
@@ -108,3 +109,6 @@ MinSizeRel/
 config/secrets.json
 *.env
 .env
+
+# Bundled runtime downloads
+ScreenMonitor/external/onnxruntime/

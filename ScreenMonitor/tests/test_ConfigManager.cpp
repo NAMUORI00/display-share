@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 #include "core/ConfigManager.h"
 #include "helpers/ConfigTestHelper.h"
+#include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 
 class ConfigManagerTest : public ::testing::Test {
 protected:
@@ -150,12 +152,41 @@ TEST_F(ConfigManagerTest, YOLOSettings) {
     EXPECT_TRUE(all_config.contains("vision_algorithms"));
     
     auto vision = all_config["vision_algorithms"];
-    auto yolo = vision["yolo_detection"];
+    auto yolo = vision["yolo26_detection"];
     
-    EXPECT_EQ(yolo["enabled"], false);  // default value
-    EXPECT_EQ(yolo["model_path"], "models/yolo.weights");  // default value
-    EXPECT_EQ(yolo["config_path"], "models/yolo.cfg");  // default value
-    EXPECT_DOUBLE_EQ(yolo["confidence_threshold"], 0.5);  // default value
+    EXPECT_EQ(yolo["enabled"], true);
+    EXPECT_EQ(yolo["onnx_model_path"], "models/yolo26n.onnx");
+    EXPECT_EQ(yolo["class_names_path"], "models/coco_classes.txt");
+    EXPECT_DOUBLE_EQ(yolo["confidence_threshold"], 0.25);
+    ASSERT_TRUE(yolo.contains("input_size"));
+    ASSERT_TRUE(yolo["input_size"].is_array());
+    ASSERT_EQ(yolo["input_size"].size(), 2);
+    EXPECT_EQ(yolo["input_size"][0], 640);
+    EXPECT_EQ(yolo["input_size"][1], 640);
+    ASSERT_TRUE(yolo.contains("execution_providers"));
+    ASSERT_TRUE(yolo["execution_providers"].is_array());
+    ASSERT_EQ(yolo["execution_providers"].size(), 2);
+    EXPECT_EQ(yolo["execution_providers"][0], "cuda");
+    EXPECT_EQ(yolo["execution_providers"][1], "cpu");
+    EXPECT_EQ(yolo["selected_gpu_id"], 0);
+}
+
+TEST_F(ConfigManagerTest, LoadsYOLO26OnlyConfigFile) {
+    json test_config = ConfigTestHelper::createDefaultTestConfig();
+    std::string config_file = ConfigTestHelper::createTempConfigFile(test_config);
+
+    ASSERT_TRUE(config_manager->loadConfig(config_file));
+
+    EXPECT_EQ(config_manager->getValue<std::string>(
+        "/vision_algorithms/selected_algorithm", ""), "yolo26");
+    EXPECT_TRUE(config_manager->getValue<bool>(
+        "/vision_algorithms/yolo26_detection/enabled", false));
+    EXPECT_EQ(config_manager->getValue<std::string>(
+        "/vision_algorithms/yolo26_detection/onnx_model_path", ""), "models/yolo26n.onnx");
+    EXPECT_EQ(config_manager->getValue<std::string>(
+        "/vision_algorithms/yolo26_detection/class_names_path", ""), "models/coco_classes.txt");
+    EXPECT_EQ(config_manager->getValue<int>(
+        "/vision_algorithms/yolo26_detection/selected_gpu_id", -1), 0);
 }
 
 // 스키마 로딩 테스트

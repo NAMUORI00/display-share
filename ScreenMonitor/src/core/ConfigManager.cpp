@@ -47,9 +47,9 @@ json ConfigManager::getDefaultSchema() const {
             }},
             {"vision_algorithms", {
                 {"type", "object"},
-                {"required", json::array({"selected_algorithm", "hsv_tracking", "yolo_detection"})},
+                {"required", json::array({"selected_algorithm", "hsv_tracking", "yolo26_detection"})},
                 {"properties", {
-                    {"selected_algorithm", {"type", "string", "enum", json::array({"hsv", "yolo"})}},
+                    {"selected_algorithm", {"type", "string", "enum", json::array({"hsv", "yolo26"})}},
                     {"hsv_tracking", {
                         {"type", "object"},
                         {"properties", {
@@ -70,14 +70,27 @@ json ConfigManager::getDefaultSchema() const {
                             {"min_contour_area", {"type", "integer", "minimum", 1}}
                         }}
                     }},
-                    {"yolo_detection", {
+                    {"yolo26_detection", {
                         {"type", "object"},
+                        {"required", json::array({"enabled", "onnx_model_path", "class_names_path", "confidence_threshold", "max_detections", "input_size", "execution_providers", "selected_gpu_id"})},
                         {"properties", {
                             {"enabled", {"type", "boolean"}},
-                            {"model_path", {"type", "string"}},
-                            {"config_path", {"type", "string"}},
+                            {"onnx_model_path", {"type", "string"}},
+                            {"class_names_path", {"type", "string"}},
                             {"confidence_threshold", {"type", "number", "minimum", 0, "maximum", 1}},
-                            {"nms_threshold", {"type", "number", "minimum", 0, "maximum", 1}}
+                            {"max_detections", {"type", "integer", "minimum", 1, "maximum", 1000}},
+                            {"input_size", {
+                                {"type", "array"},
+                                {"items", {"type", "integer", "minimum", 1}},
+                                {"minItems", 2},
+                                {"maxItems", 2}
+                            }},
+                            {"execution_providers", {
+                                {"type", "array"},
+                                {"items", {"type", "string", "enum", json::array({"cuda", "cpu"})}},
+                                {"minItems", 1}
+                            }},
+                            {"selected_gpu_id", {"type", "integer", "minimum", 0}}
                         }}
                     }}
                 }}
@@ -124,7 +137,7 @@ json ConfigManager::getDefaultConfig() const {
             {"mode", "production_mode"}
         }},
         {"vision_algorithms", {
-            {"selected_algorithm", "hsv"},
+            {"selected_algorithm", "yolo26"},
             {"hsv_tracking", {
                 {"enabled", true},
                 {"lower_bound", json::array({140, 120, 180})},
@@ -132,12 +145,15 @@ json ConfigManager::getDefaultConfig() const {
                 {"morphology_kernel_size", 3},
                 {"min_contour_area", 100}
             }},
-            {"yolo_detection", {
-                {"enabled", false},
-                {"model_path", "models/yolo.weights"},
-                {"config_path", "models/yolo.cfg"},
-                {"confidence_threshold", 0.5},
-                {"nms_threshold", 0.4}
+            {"yolo26_detection", {
+                {"enabled", true},
+                {"onnx_model_path", "models/yolo26n.onnx"},
+                {"class_names_path", "models/coco_classes.txt"},
+                {"confidence_threshold", 0.25},
+                {"max_detections", 100},
+                {"input_size", json::array({640, 640})},
+                {"execution_providers", json::array({"cuda", "cpu"})},
+                {"selected_gpu_id", 0}
             }}
         }},
         {"analytics", {
@@ -155,7 +171,7 @@ json ConfigManager::getDefaultConfig() const {
             {"enable_multithreading", true},
             {"max_processing_threads", 4},
             {"frame_buffer_size", 5},
-            {"enable_gpu_acceleration", false}
+            {"enable_gpu_acceleration", true}
         }}
     };
 }
@@ -187,7 +203,7 @@ bool ConfigManager::validateConfig(const json& config) const {
         }
         
         std::string selected_algo = config["vision_algorithms"]["selected_algorithm"].get<std::string>();
-        std::vector<std::string> valid_algorithms = {"hsv", "yolo"};
+        std::vector<std::string> valid_algorithms = {"hsv", "yolo26"};
         if (std::find(valid_algorithms.begin(), valid_algorithms.end(), selected_algo) == valid_algorithms.end()) {
             return false;
         }
@@ -214,6 +230,62 @@ bool ConfigManager::validateConfig(const json& config) const {
                     }
                 }
             }
+        }
+
+        if (!config["vision_algorithms"].contains("yolo26_detection")) {
+            return false;
+        }
+
+        const auto& yolo_section = config["vision_algorithms"]["yolo26_detection"];
+        if (!yolo_section.contains("onnx_model_path") || !yolo_section.contains("class_names_path")) {
+            return false;
+        }
+        if (!yolo_section["onnx_model_path"].is_string() || yolo_section["onnx_model_path"].get<std::string>().empty()) {
+            return false;
+        }
+        if (!yolo_section["class_names_path"].is_string() || yolo_section["class_names_path"].get<std::string>().empty()) {
+            return false;
+        }
+        if (!yolo_section.contains("confidence_threshold") || !yolo_section["confidence_threshold"].is_number()) {
+            return false;
+        }
+        const double confidence_threshold = yolo_section["confidence_threshold"].get<double>();
+        if (confidence_threshold < 0.0 || confidence_threshold > 1.0) {
+            return false;
+        }
+        if (!yolo_section.contains("input_size") || !yolo_section["input_size"].is_array() ||
+            yolo_section["input_size"].size() != 2) {
+            return false;
+        }
+        for (const auto& size_value : yolo_section["input_size"]) {
+            if (!size_value.is_number_integer() || size_value.get<int>() <= 0) {
+                return false;
+            }
+        }
+        if (!yolo_section.contains("execution_providers") || !yolo_section["execution_providers"].is_array() ||
+            yolo_section["execution_providers"].empty()) {
+            return false;
+        }
+        for (const auto& provider : yolo_section["execution_providers"]) {
+            if (!provider.is_string()) {
+                return false;
+            }
+            const auto provider_name = provider.get<std::string>();
+            if (provider_name != "cuda" && provider_name != "cpu") {
+                return false;
+            }
+        }
+        if (!yolo_section.contains("selected_gpu_id") || !yolo_section["selected_gpu_id"].is_number_integer()) {
+            return false;
+        }
+        if (yolo_section["selected_gpu_id"].get<int>() < 0) {
+            return false;
+        }
+        if (!yolo_section.contains("max_detections") || !yolo_section["max_detections"].is_number_integer()) {
+            return false;
+        }
+        if (yolo_section["max_detections"].get<int>() <= 0) {
+            return false;
         }
         
         return true;

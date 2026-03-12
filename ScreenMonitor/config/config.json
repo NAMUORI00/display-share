@@ -6,7 +6,7 @@
         "mode": "production_mode"
     },
     "vision_algorithms": {
-        "selected_algorithm": "hsv",
+        "selected_algorithm": "yolo26",
         "hsv_tracking": {
             "enabled": true,
             "lower_bound": [140, 120, 180],
@@ -14,37 +14,15 @@
             "morphology_kernel_size": 3,
             "min_contour_area": 100
         },
-        "yolo_detection": {
-            "enabled": false,
-            "model_path": "models/yolo.weights",
-            "config_path": "models/yolo.cfg",
-            "confidence_threshold": 0.5,
-            "nms_threshold": 0.4
-        },
-        "yolo11_detection": {
+        "yolo26_detection": {
             "enabled": true,
-            "onnx_model_path": "models/yolo11n.onnx",
-            "tensorrt_engine_path": "models/yolo11n.trt",
+            "onnx_model_path": "models/yolo26n.onnx",
             "class_names_path": "models/coco_classes.txt",
             "confidence_threshold": 0.25,
-            "nms_threshold": 0.45,
-            "input_size": [640, 640],
             "max_detections": 100,
-            "backend": "auto_detect",
-            "tensorrt_settings": {
-                "max_batch_size": 1,
-                "max_workspace_size": 1073741824,
-                "enable_fp16": true,
-                "enable_int8": false,
-                "enable_cuda_graph": true,
-                "enable_tactic_sources": true,
-                "dla_core": -1
-            },
-            "performance_settings": {
-                "warmup_iterations": 10,
-                "enable_profiling": false,
-                "auto_engine_rebuild": true
-            }
+            "input_size": [640, 640],
+            "execution_providers": ["cuda", "cpu"],
+            "selected_gpu_id": 0
         }
     },
     "analytics": {
@@ -62,11 +40,6 @@
         "enable_multithreading": true,
         "max_processing_threads": 4,
         "frame_buffer_size": 5,
-        "enable_gpu_acceleration": true,
-        "gpu_settings": {
-            "enable_tensorrt": true,
-            "enable_cuda": true,
-            "memory_pool_size": 512
-        }
+        "enable_gpu_acceleration": true
     }
 }

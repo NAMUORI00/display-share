@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <cstring>
 #include <chrono>
+#include <ctime>
 #include <iomanip>
 #include <algorithm>
 
@@ -61,8 +62,7 @@ MainInterface::MainInterface()
     , m_metrics(std::make_unique<ScreenMonitor::SimpleMetrics>())
     , m_captureEnabled(false)
     , m_hsvEnabled(true)
-    , m_yoloEnabled(true)
-    , m_yolov11Enabled(true)
+    , m_yolo26Enabled(true)
     , m_showAboutDialog(false)
     , m_showROIOverlay(true)
     , m_showDetectionStats(true)
@@ -76,12 +76,11 @@ MainInterface::MainInterface()
     , m_configManager()
     , m_configFilePath("config/config.json")
 {
-    // 기본 YOLO v11 설정
-    std::strncpy(m_yolov11ModelPath, "models/yolo11n.onnx", sizeof(m_yolov11ModelPath) - 1);
-    m_yolov11ModelPath[sizeof(m_yolov11ModelPath) - 1] = '\0';
-    
-    std::strncpy(m_yolov11ClassNamesPath, "models/coco.names", sizeof(m_yolov11ClassNamesPath) - 1);
-    m_yolov11ClassNamesPath[sizeof(m_yolov11ClassNamesPath) - 1] = '\0';
+    std::strncpy(m_yolo26ModelPath, "models/yolo26n.onnx", sizeof(m_yolo26ModelPath) - 1);
+    m_yolo26ModelPath[sizeof(m_yolo26ModelPath) - 1] = '\0';
+
+    std::strncpy(m_yolo26ClassNamesPath, "models/coco_classes.txt", sizeof(m_yolo26ClassNamesPath) - 1);
+    m_yolo26ClassNamesPath[sizeof(m_yolo26ClassNamesPath) - 1] = '\0';
     
     // FPS 히스토리 초기화
     m_fpsHistory.reserve(FPS_HISTORY_SIZE);
@@ -101,6 +100,8 @@ bool MainInterface::Initialize() {
         ApplyConfiguration();
     } else {
         std::cerr << "Failed to load configuration, using defaults." << std::endl;
+        RefreshYOLO26Providers();
+        ReloadYOLO26Detector();
     }
 
     std::cout << "Initializing Modern 320x320 ROI GUI System..." << std::endl;
@@ -260,24 +261,20 @@ void MainInterface::Render() {
     // 메인 도킹 공간 설정
     ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
     
-    // 첫 실행 시 레이아웃 초기화
+    // 첫 실행 시 레이아웃 초기화 (간소화된 2-패널 레이아웃)
     static bool first_time = true;
-    if (first_time) {
+    if (first_time || m_resetLayout) {
         first_time = false;
+        m_resetLayout = false;
         ImGui::DockBuilderRemoveNode(dockspace_id);
         ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
-        // 현대적인 3패널 레이아웃
-        auto dock_id_left = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.35f, nullptr, &dockspace_id);
-        auto dock_id_right = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.35f, nullptr, &dockspace_id);
-        auto dock_id_bottom = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.3f, nullptr, &dockspace_id);
+        // 간소화된 2-패널 레이아웃: 중앙(ROI) + 우측(Control)
+        auto dock_id_right = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.30f, nullptr, &dockspace_id);
 
-        // 패널 배치
-        ImGui::DockBuilderDockWindow("320x320 ROI Visualization", dockspace_id);          // 중앙: ROI 시각화
-        ImGui::DockBuilderDockWindow("Detection Results", dock_id_left);                  // 좌측: 검출 결과
-        ImGui::DockBuilderDockWindow("Control Panel", dock_id_right);                     // 우측: 제어 패널
-        ImGui::DockBuilderDockWindow("Performance Dashboard", dock_id_bottom);            // 하단: 성능 대시보드
+        ImGui::DockBuilderDockWindow("ROI View", dockspace_id);          // 중앙: ROI 시각화
+        ImGui::DockBuilderDockWindow("Control Panel", dock_id_right);    // 우측: 제어 패널
 
         ImGui::DockBuilderFinish(dockspace_id);
     }
@@ -285,15 +282,14 @@ void MainInterface::Render() {
     // 메뉴바 렌더링
     RenderMenuBar();
 
-    // 현대화된 패널들 렌더링
-    RenderROIVisualizationPanel();    // 320x320 ROI 시각화
-    RenderDetectionResultsPanel();    // 검출 결과 표시
-    RenderControlPanel();             // 간소화된 제어
-    RenderPerformanceDashboard();     // 성능 모니터링
-    RenderLogConsolePanel();          // 로그 콘솔
-    RenderHelpOverlay();              // 온보딩/단축키
+    // 필수 패널만 렌더링
+    RenderROIVisualizationPanel();    // 320x320 ROI 시각화 + 검출 요약
+    RenderControlPanel();             // 제어 패널
+    if (m_showLogConsole) {
+        RenderLogConsolePanel();      // 로그 콘솔 (메뉴 토글)
+    }
 
-    // 프레임 렌더링 후 캡처 프레임 폴링 (UI 이벤트와 분리)
+    // 프레임 렌더링 후 캡처 프레임 폴링
     PollCaptureFrame();
 
     // 상태바 렌더링
@@ -325,79 +321,54 @@ void MainInterface::Render() {
 
 void MainInterface::RenderROIVisualizationPanel() {
 #if GUI_ENABLED
-    if (ImGui::Begin("320x320 ROI Visualization")) {
-        
-        // 패널 헤더
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 0.8f, 1.0f, 1.0f));
-        ImGui::Text("🎯 Center Region Capture (320x320)");
-        ImGui::PopStyleColor();
-        ImGui::Separator();
+    if (ImGui::Begin("ROI View")) {
 
         // ROI 프레임 표시
         if (!m_roiFrame.empty() && m_frameTexture != 0) {
-            // 사용 가능한 영역 크기 계산
             const ImVec2 content_region = ImGui::GetContentRegionAvail();
-            const float aspect_ratio = 1.0f; // 320x320 = 1:1 비율
-            
-            // 320x320 이미지에 맞는 크기 계산
-            float display_width = (std::min)(content_region.x - 20.0f, content_region.y - 100.0f);
-            float display_height = display_width / aspect_ratio;
-            
-            if (display_height > content_region.y - 100.0f) {
-                display_height = content_region.y - 100.0f;
-                display_width = display_height * aspect_ratio;
-            }
+            float display_size = (std::min)(content_region.x - 10.0f, content_region.y - 80.0f);
+            if (display_size < 64.0f) display_size = 64.0f;
 
-            // 중앙 정렬을 위한 커서 위치 조정
-            const float center_x = (content_region.x - display_width) * 0.5f;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + center_x);
+            // 중앙 정렬
+            const float center_x = (content_region.x - display_size) * 0.5f;
+            if (center_x > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + center_x);
 
-            // 320x320 ROI 이미지 표시
-            ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(m_frameTexture)), 
-                        ImVec2(display_width, display_height));
+            // 320x320 ROI 이미지
+            ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(m_frameTexture)),
+                        ImVec2(display_size, display_size));
 
-            // 검출 오버레이 렌더링
+            // 검출 오버레이
             if (m_showROIOverlay) {
                 RenderDetectionOverlay(m_roiFrame);
             }
 
-            // ROI 정보 표시
-            ImGui::Spacing();
-            ImGui::Text("Region Info:");
-            ImGui::Text("  Position: (%d, %d)", m_regionInfo.x, m_regionInfo.y);
-            ImGui::Text("  Size: %dx%d", m_regionInfo.width, m_regionInfo.height);
-            ImGui::Text("  Source: %dx%d", m_regionInfo.source_width, m_regionInfo.source_height);
-            
-            // 현재 캡처 중인 모니터 정보 표시
-            ImGui::Spacing();
-            if (m_captureEnabled && m_selectedMonitor < static_cast<int>(m_monitors.size())) {
-                const auto& mon = m_monitors[m_selectedMonitor];
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.2f, 1.0f));
-                ImGui::Text("📺 Active Monitor: %s", mon.name.c_str());
-                ImGui::Text("   Resolution: %dx%d", mon.width, mon.height);
-                ImGui::Text("   Position: (%d, %d)", mon.x, mon.y);
-                ImGui::PopStyleColor();
-            } else if (!m_captureEnabled) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
-                ImGui::Text("⏸️ Capture Stopped");
-                ImGui::PopStyleColor();
+            // --- 간결한 검출 요약 (Detection Results 패널 대체) ---
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f),
+                "HSV: %zu pts | YOLO: %zu objs",
+                m_hsvDetections.size(), m_yoloDetections.size());
+
+            if (!m_yoloConfidences.empty()) {
+                float avg_conf = 0.0f;
+                for (float c : m_yoloConfidences) avg_conf += c;
+                avg_conf /= m_yoloConfidences.size();
+                ImGui::SameLine();
+                ImGui::Text("(avg %.0f%%)", avg_conf * 100.0f);
             }
-            
+
+            // ROI 정보 (한 줄 축약)
+            ImGui::TextDisabled("ROI (%d,%d) %dx%d from %dx%d",
+                m_regionInfo.x, m_regionInfo.y,
+                m_regionInfo.width, m_regionInfo.height,
+                m_regionInfo.source_width, m_regionInfo.source_height);
+
         } else {
-            // 프레임이 없을 때 플레이스홀더
-            ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - 200.0f) * 0.5f);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 50.0f);
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-            ImGui::Text("Waiting for 320x320 ROI capture...");
-            ImGui::PopStyleColor();
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 40.0f);
+            ImGui::TextDisabled("Waiting for ROI capture...");
         }
 
-        // 제어 버튼들
-        ImGui::Spacing();
-        ImGui::Separator();
-        if (ImGui::Checkbox("Show Detection Overlay", &m_showROIOverlay)) {
-            // 설정 저장
-        }
+        // 오버레이 토글
+        ImGui::Checkbox("Overlay", &m_showROIOverlay);
     }
     ImGui::End();
 #endif
@@ -405,100 +376,21 @@ void MainInterface::RenderROIVisualizationPanel() {
 
 void MainInterface::RenderDetectionResultsPanel() {
 #if GUI_ENABLED
-    if (ImGui::Begin("Detection Results")) {
-        
-        // 패널 헤더
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::Text("🔍 Real-time Detection Results");
-        ImGui::PopStyleColor();
-        ImGui::Separator();
-
-        // HSV 검출 결과
-        if (ImGui::CollapsingHeader("HSV Color Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.4f, 1.0f));
-            ImGui::Text("Status: %s", m_hsvEnabled ? "Active" : "Inactive");
-            ImGui::PopStyleColor();
-            
-            if (m_hsvEnabled && !m_hsvDetections.empty()) {
-                ImGui::Text("Detected Points: %zu", m_hsvDetections.size());
-                
-                // 최근 검출된 좌표들 표시 (최대 10개)
-                const size_t max_display = (std::min)(m_hsvDetections.size(), size_t(10));
-                for (size_t i = 0; i < max_display; ++i) {
-                    const cv::Point& pt = m_hsvDetections[i];
-                    ImGui::Text("  Point %zu: (%d, %d)", i + 1, pt.x, pt.y);
-                }
-                if (m_hsvDetections.size() > max_display) {
-                    ImGui::Text("  ... and %zu more points", m_hsvDetections.size() - max_display);
-                }
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-                ImGui::Text("No HSV detections");
-                ImGui::PopStyleColor();
-            }
-        }
-
-        // YOLO v11 검출 결과
-        if (ImGui::CollapsingHeader("YOLO v11 Object Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.4f, 1.0f));
-            ImGui::Text("Status: %s", m_yoloEnabled ? "Active" : "Inactive");
-            ImGui::PopStyleColor();
-            
-            if (m_yoloEnabled && !m_yoloDetections.empty()) {
-                ImGui::Text("Detected Objects: %zu", m_yoloDetections.size());
-                
-                // 검출된 객체들 표시
-                for (size_t i = 0; i < m_yoloDetections.size() && i < 10; ++i) {
-                    const cv::Rect& rect = m_yoloDetections[i];
-                    const float confidence = (i < m_yoloConfidences.size()) ? m_yoloConfidences[i] : 0.0f;
-                    const std::string& class_name = (i < m_yoloClassNames.size()) ? m_yoloClassNames[i] : "unknown";
-                    
-                    ImGui::Text("  %s: %.2f%% [%d,%d,%dx%d]", 
-                               class_name.c_str(), confidence * 100.0f,
-                               rect.x, rect.y, rect.width, rect.height);
-                }
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-                ImGui::Text("No YOLO detections");
-                ImGui::PopStyleColor();
-            }
-        }
-
-        // 검출 통계
-        if (m_showDetectionStats && ImGui::CollapsingHeader("Detection Statistics", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Text("Total HSV Points: %zu", m_hsvDetections.size());
-            ImGui::Text("Total YOLO Objects: %zu", m_yoloDetections.size());
-            
-            // 평균 신뢰도 계산
-            if (!m_yoloConfidences.empty()) {
-                float avg_confidence = 0.0f;
-                for (float conf : m_yoloConfidences) {
-                    avg_confidence += conf;
-                }
-                avg_confidence /= m_yoloConfidences.size();
-                ImGui::Text("Avg YOLO Confidence: %.1f%%", avg_confidence * 100.0f);
-            }
-        }
-    }
-    ImGui::End();
+    // 검출 결과는 ROI Visualization 패널에 통합됨 — 이 함수는 더 이상 호출되지 않음
 #endif
 }
 
 void MainInterface::RenderControlPanel() {
 #if GUI_ENABLED
     if (ImGui::Begin("Control Panel")) {
-        
-        // 패널 헤더
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
-        ImGui::Text("⚙️ Detection Control");
-        ImGui::PopStyleColor();
-        ImGui::Separator();
 
-        // 모니터 목록 새로고침
-        if (ImGui::Button("🔄 Refresh Monitors")) {
+        // ── 캡처 제어 (항상 표시) ──
+        if (ImGui::Button("Refresh")) {
             RefreshMonitorList();
         }
+        ImGui::SameLine();
         if (!m_monitors.empty()) {
+            ImGui::SetNextItemWidth(-1);
             std::string currentLabel;
             if (m_selectedMonitor < static_cast<int>(m_monitors.size())) {
                 const auto& mon = m_monitors[m_selectedMonitor];
@@ -506,7 +398,7 @@ void MainInterface::RenderControlPanel() {
             } else {
                 currentLabel = "Select Monitor";
             }
-            if (ImGui::BeginCombo("Monitor", currentLabel.c_str())) {
+            if (ImGui::BeginCombo("##monitor", currentLabel.c_str())) {
                 for (int i = 0; i < static_cast<int>(m_monitors.size()); ++i) {
                     bool selected = (i == m_selectedMonitor);
                     const auto& mon = m_monitors[i];
@@ -523,12 +415,12 @@ void MainInterface::RenderControlPanel() {
                 ImGui::EndCombo();
             }
         } else {
-            ImGui::TextDisabled("No monitors detected");
+            ImGui::TextDisabled("No monitors");
         }
 
-        bool canStart = !m_captureEnabled && !m_monitors.empty();
-        if (!canStart) ImGui::BeginDisabled(true);
-        if (ImGui::Button(m_captureEnabled ? "🛑 Stop Capture" : "▶️ Start Capture", ImVec2(-1, 40))) {
+        const bool allowCaptureToggle = m_captureEnabled || !m_monitors.empty();
+        if (!allowCaptureToggle) ImGui::BeginDisabled(true);
+        if (ImGui::Button(m_captureEnabled ? "Stop" : "Start", ImVec2(-1, 32))) {
             if (!m_captureEnabled) {
                 int monIndex = (m_selectedMonitor < static_cast<int>(m_monitors.size())) ? m_monitors[m_selectedMonitor].index : 0;
                 if (!StartCapture(monIndex)) {
@@ -538,49 +430,63 @@ void MainInterface::RenderControlPanel() {
                 StopCapture();
             }
         }
-        if (!canStart) ImGui::EndDisabled();
+        if (!allowCaptureToggle) ImGui::EndDisabled();
 
-        ImGui::Spacing();
         ImGui::Separator();
 
-        // HSV 설정
-        if (ImGui::CollapsingHeader("HSV Color Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("Enable HSV Detection", &m_hsvEnabled);
-            
-            ImGui::Text("HSV Lower Bound:");
+        // ── 검출 토글 ──
+        ImGui::Checkbox("HSV Detection", &m_hsvEnabled);
+        ImGui::SameLine();
+        ImGui::Checkbox("YOLO26", &m_yolo26Enabled);
+
+        // ── HSV 설정 (기본 접힘) ──
+        if (ImGui::CollapsingHeader("HSV Settings")) {
             ImGui::SliderInt("H Min", &m_hsvLower[0], 0, 179);
             ImGui::SliderInt("S Min", &m_hsvLower[1], 0, 255);
             ImGui::SliderInt("V Min", &m_hsvLower[2], 0, 255);
-            
-            ImGui::Text("HSV Upper Bound:");
             ImGui::SliderInt("H Max", &m_hsvUpper[0], 0, 179);
             ImGui::SliderInt("S Max", &m_hsvUpper[1], 0, 255);
             ImGui::SliderInt("V Max", &m_hsvUpper[2], 0, 255);
         }
 
-        // YOLO v11 설정
-        if (ImGui::CollapsingHeader("YOLO v11 Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("Enable YOLO Detection", &m_yolov11Enabled);
-            
-            ImGui::SliderFloat("Confidence Threshold", &m_yolov11Confidence, 0.0f, 1.0f, "%.2f");
-            ImGui::SliderFloat("NMS Threshold", &m_yolov11NMS, 0.0f, 1.0f, "%.2f");
-            
-            if (ImGui::Button("Load YOLO Model", ImVec2(-1, 25))) {
-                // 모델 로드 트리거
+        // ── YOLO26 설정 (기본 접힘) ──
+        if (ImGui::CollapsingHeader("YOLO26 Settings")) {
+            ImGui::SliderFloat("Confidence", &m_yolo26Confidence, 0.0f, 1.0f, "%.2f");
+            ImGui::InputInt("GPU ID", &m_yolo26SelectedGpuId);
+            if (m_yolo26SelectedGpuId < 0) m_yolo26SelectedGpuId = 0;
+
+            std::string current_gpu_label = "Custom GPU ID";
+            for (const auto& device : m_yolo26Providers) {
+                if (device.device_id == m_yolo26SelectedGpuId) {
+                    current_gpu_label = std::to_string(device.device_id) + ": " + device.name;
+                    break;
+                }
+            }
+            if (m_yolo26Providers.empty()) current_gpu_label = "No GPUs";
+
+            if (ImGui::BeginCombo("GPU", current_gpu_label.c_str())) {
+                for (const auto& device : m_yolo26Providers) {
+                    const bool selected = device.device_id == m_yolo26SelectedGpuId;
+                    const std::string label = std::to_string(device.device_id) + ": " + device.name;
+                    if (ImGui::Selectable(label.c_str(), selected)) {
+                        m_yolo26SelectedGpuId = device.device_id;
+                    }
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::InputText("Model", m_yolo26ModelPath, sizeof(m_yolo26ModelPath));
+            ImGui::InputText("Classes", m_yolo26ClassNamesPath, sizeof(m_yolo26ClassNamesPath));
+
+            if (ImGui::Button("Reload Session", ImVec2(-1, 0))) {
+                ReloadYOLO26Detector();
             }
         }
 
-        // 성능 설정
-        if (ImGui::CollapsingHeader("Performance Settings")) {
-            ImGui::SliderFloat("Target FPS", &m_targetFPS, 30.0f, 120.0f, "%.0f");
-            ImGui::Checkbox("Show Detection Statistics", &m_showDetectionStats);
-            ImGui::Checkbox("Show ROI Overlay", &m_showROIOverlay);
-        }
-
-        // 설정 저장/로드
-        ImGui::Spacing();
+        // ── 저장 ──
         ImGui::Separator();
-        if (ImGui::Button("Save Settings", ImVec2(-1, 25))) {
+        if (ImGui::Button("Save Settings", ImVec2(-1, 0))) {
             SaveConfiguration();
         }
     }
@@ -590,74 +496,7 @@ void MainInterface::RenderControlPanel() {
 
 void MainInterface::RenderPerformanceDashboard() {
 #if GUI_ENABLED
-    if (ImGui::Begin("Performance Dashboard")) {
-        
-        // 패널 헤더
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.6f, 1.0f));
-        ImGui::Text("📊 System Performance Metrics");
-        ImGui::PopStyleColor();
-        ImGui::Separator();
-
-        // 실시간 메트릭 표시
-    if (m_metrics) {
-            const double current_fps = m_metrics->getCurrentFPS();
-            const double process_time = m_metrics->getCurrentProcessTime();
-            
-            // FPS 표시 (색상 코딩)
-            ImVec4 fps_color = (current_fps >= m_targetFPS * 0.9f) ? 
-                               ImVec4(0.2f, 1.0f, 0.4f, 1.0f) :   // 녹색: 좋음
-                               (current_fps >= m_targetFPS * 0.7f) ? 
-                               ImVec4(1.0f, 0.8f, 0.2f, 1.0f) :   // 노랑: 보통
-                               ImVec4(1.0f, 0.3f, 0.2f, 1.0f);    // 빨강: 나쁨
-            
-            // 카드 레이아웃 시작
-            ImGui::BeginGroup();
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8,8));
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            const ImU32 bg = IM_COL32(32,34,36,255);
-            const ImU32 accGood = IM_COL32(40,180,90,255);
-            const ImU32 accWarn = IM_COL32(210,170,50,255);
-            const ImU32 accBad  = IM_COL32(210,60,40,255);
-            const ImU32 fpsBorder = (current_fps >= m_targetFPS*0.9f)?accGood:(current_fps>=m_targetFPS*0.7f?accWarn:accBad);
-            DrawMetricCard("fps_card","FPS", (std::ostringstream() << std::fixed << std::setprecision(1) << current_fps << "/" << (int)m_targetFPS).str(), bg, fpsBorder);
-            DrawMetricCard("proc_card","Proc ms", (std::ostringstream() << std::fixed << std::setprecision(2) << process_time).str(), bg, IM_COL32(70,130,200,255));
-            DrawMetricCard("hsv_pts","HSV Points", std::to_string(m_hsvDetections.size()), bg, IM_COL32(80,200,120,255));
-            DrawMetricCard("yolo_objs","YOLO Objs", std::to_string(m_yoloDetections.size()), bg, IM_COL32(200,140,80,255));
-            ImGui::PopStyleVar();
-            ImGui::EndGroup();
-            
-            // FPS 그래프
-            if (ImGui::CollapsingHeader("FPS History", ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (!m_fpsHistory.empty()) {
-                    ImGui::PlotLines("FPS", m_fpsHistory.data(), static_cast<int>(m_fpsHistory.size()),
-                                    0, nullptr, 0.0f, m_targetFPS * 1.2f, ImVec2(0, 80));
-                }
-            }
-        }
-
-        // 320x320 ROI 성능 메트릭
-        if (ImGui::CollapsingHeader("ROI Processing Metrics", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (m_centerCapture) {
-                const auto perf_metrics = m_centerCapture->GetPerformanceMetrics();
-                ImGui::Text("ROI Extractions: %llu", perf_metrics.total_extractions);
-                ImGui::Text("Avg Extraction Time: %.3f ms", perf_metrics.average_time_ms);
-                ImGui::Text("Memory Usage: %.1f KB", perf_metrics.memory_usage_bytes / 1024.0);
-                
-                if (ImGui::Button("Reset ROI Metrics", ImVec2(-1, 25))) {
-                    m_centerCapture->ResetPerformanceMetrics();
-                }
-            }
-        }
-
-        // 시스템 상태
-        if (ImGui::CollapsingHeader("System Status")) {
-            ImGui::Text("Capture Status: %s", m_captureEnabled ? "Running" : "Stopped");
-            ImGui::Text("HSV Detection: %s", m_hsvEnabled ? "Enabled" : "Disabled");
-            ImGui::Text("YOLO Detection: %s", m_yolov11Enabled ? "Enabled" : "Disabled");
-            ImGui::Text("ROI Size: 320x320 pixels");
-        }
-    }
-    ImGui::End();
+    // 성능 정보는 상태바에 통합됨 — 이 함수는 더 이상 호출되지 않음
 #endif
 }
 
@@ -681,7 +520,7 @@ void MainInterface::RenderDetectionOverlay(const cv::Mat& frame) {
     }
 
     // YOLO 바운딩 박스 표시
-    if (m_yoloEnabled && !m_yoloDetections.empty()) {
+    if (m_yolo26Enabled && !m_yoloDetections.empty()) {
         for (size_t i = 0; i < m_yoloDetections.size(); ++i) {
             const cv::Rect& rect = m_yoloDetections[i];
             
@@ -748,14 +587,16 @@ void MainInterface::RenderMenuBar() {
 #if GUI_ENABLED
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("System")) {
-            if (ImGui::MenuItem("Start Detection", "Ctrl+S", nullptr, !m_captureEnabled)) {
-                m_captureEnabled = true;
+            if (ImGui::MenuItem("Start", "Ctrl+S", nullptr, !m_captureEnabled)) {
+                const int monitor_index =
+                    (m_selectedMonitor < static_cast<int>(m_monitors.size())) ? m_monitors[m_selectedMonitor].index : 0;
+                StartCapture(monitor_index);
             }
-            if (ImGui::MenuItem("Stop Detection", "Ctrl+Q", nullptr, m_captureEnabled)) {
-                m_captureEnabled = false;
+            if (ImGui::MenuItem("Stop", "Ctrl+Q", nullptr, m_captureEnabled)) {
+                StopCapture();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Save Configuration", "Ctrl+Shift+S")) {
+            if (ImGui::MenuItem("Save Config")) {
                 SaveConfiguration();
             }
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -763,20 +604,24 @@ void MainInterface::RenderMenuBar() {
             }
             ImGui::EndMenu();
         }
-        
+
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("ROI Overlay", nullptr, &m_showROIOverlay);
-            ImGui::MenuItem("Detection Stats", nullptr, &m_showDetectionStats);
+            ImGui::MenuItem("Log Console", nullptr, &m_showLogConsole);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset Layout")) {
+                m_resetLayout = true;
+            }
             ImGui::EndMenu();
         }
-        
+
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About")) {
                 m_showAboutDialog = true;
             }
             ImGui::EndMenu();
         }
-        
+
         ImGui::EndMainMenuBar();
     }
 #endif
@@ -787,17 +632,20 @@ void MainInterface::RenderStatusBar() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImVec2 work_pos = viewport->WorkPos;
     ImVec2 work_size = viewport->WorkSize;
-    
+
     ImGui::SetNextWindowPos(ImVec2(work_pos.x, work_pos.y + work_size.y - 25));
     ImGui::SetNextWindowSize(ImVec2(work_size.x, 25));
-    
-    if (ImGui::Begin("StatusBar", nullptr, 
-                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | 
+
+    if (ImGui::Begin("StatusBar", nullptr,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar)) {
-        
-        ImGui::Text("Status: %s | FPS: %.1f | HSV: %zu points | YOLO: %zu objects", 
+
+        double proc_ms = 0.0;
+        if (m_metrics) proc_ms = m_metrics->getCurrentProcessTime();
+
+        ImGui::Text("%s | FPS: %.1f | Proc: %.1fms | HSV: %zu | YOLO: %zu",
                    m_captureEnabled ? "Running" : "Stopped",
-                   m_currentFPS,
+                   m_currentFPS, proc_ms,
                    m_hsvDetections.size(),
                    m_yoloDetections.size());
     }
@@ -826,13 +674,13 @@ void MainInterface::RenderAboutDialog() {
         ImGui::Text("Features:");
         ImGui::BulletText("Real-time 320x320 center region capture");
         ImGui::BulletText("HSV color detection with coordinate tracking");
-        ImGui::BulletText("YOLO v11 object detection with TensorRT optimization");
+        ImGui::BulletText("YOLO26 object detection with ONNX Runtime");
         ImGui::BulletText("Professional ImGui interface with docking support");
         ImGui::BulletText("Performance monitoring and metrics");
         
         ImGui::Spacing();
         ImGui::Text("System Version: 3.0 (Modernized)");
-        ImGui::Text("Built with OpenCV, ImGui, and TensorRT");
+        ImGui::Text("Built with OpenCV, ImGui, and ONNX Runtime");
     }
     ImGui::End();
 #endif
@@ -871,25 +719,10 @@ void MainInterface::RenderLogConsolePanel() {
 #endif
 }
 
-// ================== 신규: 도움말/단축키 오버레이 ==================
+// 도움말 오버레이 — 간소화에 따라 기본 숨김, 메뉴의 About으로 대체됨
 void MainInterface::RenderHelpOverlay() {
 #if GUI_ENABLED
-    if (!m_showHelpOverlay) return;
-    const float PAD = 10.0f;
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImVec2 pos = ImVec2(vp->Pos.x + vp->Size.x - 360.0f - PAD, vp->Pos.y + PAD);
-    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.85f);
-    if (ImGui::Begin("QuickHelp", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
-        ImGui::Text("Shortcuts & Tips");
-        ImGui::Separator();
-        ImGui::Text("Ctrl+S : Start Capture");
-        ImGui::Text("Ctrl+Q : Stop Capture");
-        ImGui::Text("F1 : Toggle Help Overlay");
-        ImGui::Text("Use Docking to rearrange panels");
-        if (ImGui::Button("Hide")) m_showHelpOverlay = false;
-    }
-    ImGui::End();
+    // 간소화된 UI에서는 더 이상 표시하지 않음
 #endif
 }
 
@@ -1098,7 +931,7 @@ void MainInterface::PollCaptureFrame() {
             }
             
             // YOLO 객체 검출 실행 (옵션)  
-            if (m_yoloEnabled && m_yolov11Enabled && !roi.empty()) {
+            if (m_yolo26Enabled && !roi.empty()) {
                 std::vector<cv::Rect> yolo_boxes;
                 std::vector<float> yolo_confs;
                 std::vector<std::string> yolo_names;
@@ -1119,6 +952,9 @@ void MainInterface::PollCaptureFrame() {
 
 void MainInterface::RefreshMonitorList() {
     m_monitors.clear();
+    if (!m_captureDevice) {
+        m_captureDevice = std::make_unique<ScreenCaptureLiteDevice>();
+    }
     if (m_captureDevice) {
         m_monitors = m_captureDevice->GetAvailableMonitors();
         if (m_monitors.empty()) {
@@ -1148,15 +984,50 @@ void MainInterface::UpdateFrame(const cv::Mat& frame) {
 }
 
 void MainInterface::AddLogMessage(const std::string& message, int level) {
-    // 로그 시스템 간소화 (콘솔 출력으로 대체)
-    std::cout << "[LOG" << level << "] " << message << std::endl;
+    std::string normalized_message = message;
+    while (!normalized_message.empty() &&
+           (normalized_message.back() == '\n' || normalized_message.back() == '\r')) {
+        normalized_message.pop_back();
+    }
+
+    if (normalized_message.empty()) {
+        return;
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm local_time{};
+#if defined(_WIN32)
+    localtime_s(&local_time, &now_time);
+#else
+    localtime_r(&now_time, &local_time);
+#endif
+
+    std::ostringstream timestamp;
+    timestamp << std::put_time(&local_time, "%H:%M:%S");
+    m_logMessages.push_back({normalized_message, level, timestamp.str()});
+    if (m_logMessages.size() > MAX_LOG_ENTRIES) {
+        m_logMessages.erase(m_logMessages.begin());
+    }
+
+    std::cout << "[LOG" << level << "] " << normalized_message << std::endl;
 }
 
 void MainInterface::SaveConfiguration() {
+    if (!m_configManager.isLoaded()) {
+        m_configManager.resetToDefaults();
+    }
+
     m_configManager.setValue("/vision_algorithms/hsv_tracking/enabled", m_hsvEnabled);
-    m_configManager.setValue("/vision_algorithms/yolo_v11/enabled", m_yolov11Enabled);
-    m_configManager.setValue("/vision_algorithms/yolo_v11/confidence_threshold", m_yolov11Confidence);
-    m_configManager.setValue("/vision_algorithms/yolo_v11/nms_threshold", m_yolov11NMS);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/enabled", m_yolo26Enabled);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/onnx_model_path", std::string(m_yolo26ModelPath));
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/class_names_path", std::string(m_yolo26ClassNamesPath));
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/confidence_threshold", m_yolo26Confidence);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/max_detections", m_yolo26MaxDetections);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/input_size/0", m_yolo26InputWidth);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/input_size/1", m_yolo26InputHeight);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/selected_gpu_id", m_yolo26SelectedGpuId);
+    m_configManager.setValue("/vision_algorithms/yolo26_detection/execution_providers", m_yolo26ExecutionProviders);
     
     if (m_configManager.saveConfig(m_configFilePath)) {
         std::cout << "Configuration saved to " << m_configFilePath << std::endl;
@@ -1170,11 +1041,28 @@ void MainInterface::LoadConfiguration() {
 }
 
 void MainInterface::ApplyConfiguration() {
-    // 설정 적용 로직 간소화
     m_hsvEnabled = m_configManager.getValue("/vision_algorithms/hsv_tracking/enabled", true);
-    m_yolov11Enabled = m_configManager.getValue("/vision_algorithms/yolo_v11/enabled", true);
-    m_yolov11Confidence = m_configManager.getValue("/vision_algorithms/yolo_v11/confidence_threshold", 0.25f);
-    m_yolov11NMS = m_configManager.getValue("/vision_algorithms/yolo_v11/nms_threshold", 0.45f);
+    m_yolo26Enabled = m_configManager.getValue("/vision_algorithms/yolo26_detection/enabled", true);
+    m_yolo26Confidence = m_configManager.getValue("/vision_algorithms/yolo26_detection/confidence_threshold", 0.25f);
+    m_yolo26MaxDetections = m_configManager.getValue("/vision_algorithms/yolo26_detection/max_detections", 100);
+    m_yolo26InputWidth = m_configManager.getValue("/vision_algorithms/yolo26_detection/input_size/0", 640);
+    m_yolo26InputHeight = m_configManager.getValue("/vision_algorithms/yolo26_detection/input_size/1", 640);
+    m_yolo26SelectedGpuId = m_configManager.getValue("/vision_algorithms/yolo26_detection/selected_gpu_id", 0);
+    m_yolo26ExecutionProviders = m_configManager.getValue(
+        "/vision_algorithms/yolo26_detection/execution_providers",
+        std::vector<std::string>{"cuda", "cpu"});
+
+    const std::string model_path = m_configManager.getValue("/vision_algorithms/yolo26_detection/onnx_model_path",
+                                                            std::string("models/yolo26n.onnx"));
+    const std::string class_names_path = m_configManager.getValue("/vision_algorithms/yolo26_detection/class_names_path",
+                                                                  std::string("models/coco_classes.txt"));
+
+    std::strncpy(m_yolo26ModelPath, model_path.c_str(), sizeof(m_yolo26ModelPath) - 1);
+    m_yolo26ModelPath[sizeof(m_yolo26ModelPath) - 1] = '\0';
+    std::strncpy(m_yolo26ClassNamesPath, class_names_path.c_str(), sizeof(m_yolo26ClassNamesPath) - 1);
+    m_yolo26ClassNamesPath[sizeof(m_yolo26ClassNamesPath) - 1] = '\0';
+
+    ReloadYOLO26Detector();
 }
 
 void MainInterface::UpdateConfigurationFromGui() {
@@ -1183,6 +1071,56 @@ void MainInterface::UpdateConfigurationFromGui() {
 
 void MainInterface::AutoSaveConfiguration() {
     SaveConfiguration();
+}
+
+bool MainInterface::InitializeYOLO26Detector() {
+    m_yolo26LastError.clear();
+    m_yolo26ProviderStatus = "disabled";
+    m_yolo26CpuFallback = false;
+
+    if (!m_yolo26Enabled) {
+        m_yolo26Detector.reset();
+        return true;
+    }
+
+    auto detector = std::make_unique<YOLO26OnnxRuntimeInference>();
+    YOLO26OnnxRuntimeInference::Settings settings;
+    settings.onnx_model_path = m_yolo26ModelPath;
+    settings.class_names_path = m_yolo26ClassNamesPath;
+    settings.confidence_threshold = m_yolo26Confidence;
+    settings.max_detections = m_yolo26MaxDetections;
+    settings.input_width = m_yolo26InputWidth;
+    settings.input_height = m_yolo26InputHeight;
+    settings.selected_gpu_id = m_yolo26SelectedGpuId;
+    settings.execution_providers = m_yolo26ExecutionProviders;
+
+    if (!detector->Initialize(settings)) {
+        m_yolo26LastError = detector->GetLastError();
+        m_yolo26ProviderStatus = "initialization failed";
+        AddLogMessage("YOLO26 init failed: " + m_yolo26LastError, 2);
+        m_yolo26Detector = std::move(detector);
+        return false;
+    }
+
+    m_yolo26Providers = detector->GetAvailableProviders();
+    m_yolo26ProviderStatus = detector->GetActiveProviderName();
+    m_yolo26CpuFallback = detector->IsUsingCpuFallback();
+    m_yolo26LastError = detector->GetLastError();
+    AddLogMessage("YOLO26 session ready with provider: " + m_yolo26ProviderStatus, 0);
+    m_yolo26Detector = std::move(detector);
+    return true;
+}
+
+bool MainInterface::ReloadYOLO26Detector() {
+    RefreshYOLO26Providers();
+    return InitializeYOLO26Detector();
+}
+
+void MainInterface::RefreshYOLO26Providers() {
+    if (!m_yolo26Detector) {
+        m_yolo26Detector = std::make_unique<YOLO26OnnxRuntimeInference>();
+    }
+    m_yolo26Providers = m_yolo26Detector->GetAvailableProviders();
 }
 
 void MainInterface::SetupStreamRedirection() {
@@ -1240,24 +1178,29 @@ void MainInterface::PerformHSVDetection(const cv::Mat& roi, std::vector<cv::Poin
 
 void MainInterface::PerformYOLODetection(const cv::Mat& roi, std::vector<cv::Rect>& boxes, 
                                           std::vector<float>& confidences, std::vector<std::string>& class_names) {
-    // YOLO 검출은 현재 플레이스홀더 구현
-    // 실제 TensorRT YOLO 엔진이 구현되면 교체 예정
     boxes.clear();
     confidences.clear();
     class_names.clear();
-    
-    // 데모 목적으로 랜덤 검출 박스 생성 (실제로는 YOLO 추론 결과)
-    if (!roi.empty() && roi.cols >= 320 && roi.rows >= 320) {
-        // 예시: 중앙에 임의의 검출 박스 생성 (테스트용)
-        static int frame_count = 0;
-        frame_count++;
-        
-        if (frame_count % 30 == 0) { // 30프레임마다 한 번씩 검출
-            cv::Rect demo_box(roi.cols/4, roi.rows/4, roi.cols/2, roi.rows/2);
-            boxes.push_back(demo_box);
-            confidences.push_back(0.85f);
-            class_names.push_back("demo_object");
+
+    if (roi.empty() || !m_yolo26Enabled) {
+        return;
+    }
+
+    if (!m_yolo26Detector || !m_yolo26Detector->IsInitialized()) {
+        if (!ReloadYOLO26Detector()) {
+            return;
         }
+    }
+
+    const auto detections = m_yolo26Detector->DetectMultiple(roi);
+    m_yolo26ProviderStatus = m_yolo26Detector->GetActiveProviderName();
+    m_yolo26CpuFallback = m_yolo26Detector->IsUsingCpuFallback();
+    m_yolo26LastError = m_yolo26Detector->GetLastError();
+
+    for (const auto& detection : detections) {
+        boxes.push_back(detection.bounding_box);
+        confidences.push_back(static_cast<float>(detection.confidence));
+        class_names.push_back(detection.label);
     }
 }
 

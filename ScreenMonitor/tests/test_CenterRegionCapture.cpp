@@ -71,7 +71,7 @@ TEST_F(CenterRegionCaptureTest, CoordinateAccuracy) {
     int center_y = (source_size.height - 320) / 2;
     
     // Mark specific points that should appear in center region
-    cv::circle(source_image, cv::Point(center_x + 50, center_y + 50), 5, cv::Scalar(255, 0, 0), -1);
+    cv::circle(source_image, cv::Point(center_x + 50, center_y + 50), 5, cv::Scalar(0, 0, 255), -1);
     cv::circle(source_image, cv::Point(center_x + 270, center_y + 270), 5, cv::Scalar(0, 255, 0), -1);
     
     cv::Mat center_region;

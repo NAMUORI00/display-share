@@ -73,15 +73,13 @@ namespace Constants {
         // YOLO 객체 감지
         namespace YOLO {
             constexpr float DEFAULT_CONFIDENCE_THRESHOLD = 0.25f;
-            constexpr float DEFAULT_NMS_THRESHOLD = 0.45f;
             constexpr int DEFAULT_INPUT_WIDTH = 640;
             constexpr int DEFAULT_INPUT_HEIGHT = 640;
             constexpr int MAX_DETECTIONS = 100;
             
             // 모델 파일 경로
-            const std::string DEFAULT_MODEL_PATH = "models/yolo11n.onnx";
+            const std::string DEFAULT_MODEL_PATH = "models/yolo26n.onnx";
             const std::string DEFAULT_CLASSES_PATH = "models/coco_classes.txt";
-            const std::string DEFAULT_CONFIG_PATH = "models/yolo.cfg";
         }
         
         // 일반 감지 설정

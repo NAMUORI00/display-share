@@ -47,7 +47,7 @@ void PrintApplicationInfo() {
     std::cout << "- ImGui GUI with GLFW + OpenGL3" << std::endl;
     std::cout << "- Real-time screen capture (screen_capture_lite)" << std::endl;
     std::cout << "- OpenCV computer vision (static linked)" << std::endl;
-    std::cout << "- HSV color detection & YOLO v11 object detection" << std::endl;
+    std::cout << "- HSV color detection & YOLO26 object detection" << std::endl;
     std::cout << "- Real-time performance monitoring" << std::endl;
 }
 
@@ -76,7 +76,8 @@ int main() {
     std::cout << "\n=== PERFORMANCE TEST MODE (10s) ===" << std::endl;
     try {
         auto device = std::make_unique<ScreenCaptureLiteDevice>();
-        CaptureSettings settings; settings.target_fps = 60; settings.quality = 85;
+        ICaptureDevice::CaptureSettings settings;
+        settings.target_fps = 60;
         if(!device->Initialize(settings)) { std::cerr << "Init failed" << std::endl; return -1; }
         if(!device->StartCapture(0)) { std::cerr << "StartCapture failed" << std::endl; return -1; }
         device->SetCenterRegionMode(true);
@@ -157,7 +158,7 @@ int main() {
         std::cout << "1. Select a monitor from the dropdown" << std::endl;
         std::cout << "2. Click 'Start Capture' to begin real-time screen capture" << std::endl;
         std::cout << "3. Configure HSV color detection settings" << std::endl;
-        std::cout << "4. Enable YOLO v11 object detection" << std::endl;
+        std::cout << "4. Enable YOLO26 object detection" << std::endl;
         std::cout << "5. Monitor real-time performance metrics" << std::endl;
         std::cout << "\nClose the GUI window to exit." << std::endl;
         
