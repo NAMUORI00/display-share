@@ -1,105 +1,86 @@
-# YOLO v11 모델 가이드
+# YOLO26 모델 가이드
 
-## YOLO v11 ONNX 모델 다운로드
+이 디렉토리는 `YOLO26 detect ONNX` 모델과 클래스 파일을 두는 위치입니다.
 
-이 디렉토리는 YOLO v11 ONNX 모델 파일들을 저장하는 곳입니다.
+## 지원 범위
 
-### 1. 준비사항
+- 지원 모델: `YOLO26 detect`
+- 권장 입력: `640x640`
+- 권장 배치: `batch=1`
+- 실행 백엔드: `ONNX Runtime CUDA -> CPU fallback`
 
-```bash
-# Python 및 Ultralytics 설치
-pip install ultralytics
-```
+다음 항목은 이 가이드 범위에 포함하지 않습니다.
 
-### 2. YOLO v11 모델 다운로드 및 변환
+- segmentation / pose / tracking head
 
-#### 2.1 사전 훈련된 모델 다운로드
-```bash
-# 나노 모델 (가장 빠름, 정확도 낮음)
-yolo export model=yolo11n.pt format=onnx imgsz=640 opset=12
+## 권장 파일 구조
 
-# 스몰 모델 (균형)
-yolo export model=yolo11s.pt format=onnx imgsz=640 opset=12
-
-# 미디엄 모델 (정확도 중점)
-yolo export model=yolo11m.pt format=onnx imgsz=640 opset=12
-
-# 라지 모델 (최고 정확도, 가장 느림)
-yolo export model=yolo11l.pt format=onnx imgsz=640 opset=12
-```
-
-#### 2.2 수동 다운로드 (Python 스크립트)
-```python
-from ultralytics import YOLO
-
-# 모델 로드 및 ONNX 변환
-model = YOLO("yolo11n.pt")  # 나노 모델
-model.export(format="onnx", imgsz=640, opset=12)
-
-# 변환된 파일을 models/ 디렉토리로 이동
-import shutil
-shutil.move("yolo11n.onnx", "models/yolo11n.onnx")
-```
-
-### 3. 모델 파일 구조
-
-변환 완료 후 다음과 같은 구조가 되어야 합니다:
-
-```
+```text
 models/
-├── README.md           # 이 파일
-├── yolo11n.onnx       # 나노 모델 (권장)
-├── yolo11s.onnx       # 스몰 모델 (선택사항)
-├── yolo11m.onnx       # 미디엄 모델 (선택사항)
-├── yolo11l.onnx       # 라지 모델 (선택사항)
-└── coco_classes.txt   # COCO 클래스 이름 (자동 생성)
+├── README.md
+├── yolo26n.onnx
+└── coco_classes.txt
 ```
 
-### 4. 모델 검증
+필요하면 `yolo26s.onnx`, `yolo26m.onnx` 같은 추가 변형을 둘 수 있지만, 기본 문서와 설정 예시는 `yolo26n.onnx`를 기준으로 합니다.
 
-```python
-import onnx
+## 모델 준비
 
-# ONNX 모델 검증
-model = onnx.load('models/yolo11n.onnx')
-onnx.checker.check_model(model)
-print("모델 검증 완료!")
+Ultralytics가 제공하는 YOLO26 export 경로를 사용해 ONNX 파일을 준비합니다.
+
+```bash
+pip install ultralytics
+yolo export model=yolo26n.pt format=onnx imgsz=640 batch=1 dynamic=False
 ```
 
-### 5. 권장 설정
+가능하면 프로젝트에서 검증한 export 계약 하나만 유지하세요. 입력 크기, 배치, output 형식이 달라지면 런타임이 해당 모델을 거부할 수 있습니다.
 
-- **개발/테스트**: yolo11n.onnx (가장 빠름)
-- **일반 사용**: yolo11s.onnx (균형점)
-- **고정확도 필요시**: yolo11m.onnx 또는 yolo11l.onnx
+## 배치 위치
 
-### 6. 지원하는 클래스
+생성된 ONNX 파일을 이 폴더에 두고 설정에서 경로를 맞춥니다.
 
-YOLO v11 모델은 COCO 데이터셋의 80개 클래스를 지원합니다:
-- person, bicycle, car, motorcycle, airplane, bus, train, truck
-- boat, traffic light, fire hydrant, stop sign, parking meter, bench
-- bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe
-- backpack, umbrella, handbag, tie, suitcase, frisbee, skis, snowboard
-- sports ball, kite, baseball bat, baseball glove, skateboard, surfboard
-- tennis racket, bottle, wine glass, cup, fork, knife, spoon, bowl
-- banana, apple, sandwich, orange, broccoli, carrot, hot dog, pizza
-- donut, cake, chair, couch, potted plant, bed, dining table, toilet
-- tv, laptop, mouse, remote, keyboard, cell phone, microwave, oven
-- toaster, sink, refrigerator, book, clock, vase, scissors, teddy bear
-- hair drier, toothbrush
+```text
+ScreenMonitor/models/yolo26n.onnx
+ScreenMonitor/models/coco_classes.txt
+```
 
-### 7. 문제 해결
+기본 설정값:
 
-#### 7.1 모델 로딩 실패
-- OpenCV 버전이 4.10.0 이상인지 확인
-- ONNX 파일이 손상되지 않았는지 확인
-- opset 버전 조정 (10, 11, 12 중 시도)
+- 모델 경로: `models/yolo26n.onnx`
+- 클래스 파일: `models/coco_classes.txt`
 
-#### 7.2 성능 문제
-- GPU 가속 활성화 여부 확인
-- 입력 이미지 크기 조정 (640x640 권장)
-- 모델 크기별 성능 차이 고려
+## 클래스 파일
 
-### 8. 라이센스
+`coco_classes.txt`는 모델이 학습된 클래스 순서와 동일해야 합니다. COCO 계열 모델을 쓰면 일반적으로 80개 클래스 목록을 사용합니다.
 
-YOLO v11 모델은 AGPL-3.0 라이센스를 따릅니다.
-상업적 사용을 위해서는 Ultralytics 라이센스를 구매해야 할 수 있습니다.
+클래스 파일이 누락되면 GUI 또는 초기화 단계에서 오류가 발생할 수 있습니다.
+
+## GPU 사용 방식
+
+이 프로젝트의 문서상 GPU 사용 정책은 단순합니다.
+
+- 앱 하나는 GPU 하나만 선택
+- 가능한 경우 CUDA provider로 실행
+- 선택한 GPU에서 세션 생성에 실패하면 CPU fallback
+- 앱 내부에서 여러 GPU에 추론을 분산하지 않음
+
+다중 GPU 시스템에서는 각 앱 인스턴스가 서로 다른 GPU를 선택하는 사용 형태를 가정합니다.
+
+## 문제 해결
+
+### 모델 초기화 실패
+
+- `yolo26n.onnx` 경로가 맞는지 확인
+- CMake configure가 ONNX Runtime GPU 번들을 정상적으로 내려받았는지 확인
+- CUDA provider DLL이 실행 파일 옆에 배치됐는지 확인
+- 모델이 `detect ONNX / batch=1 / 640x640` 계약과 크게 다르지 않은지 확인
+
+### GPU가 선택되지 않음
+
+- NVIDIA GPU와 드라이버가 정상인지 확인
+- ONNX Runtime GPU 패키지와 CUDA 런타임 버전 조합이 맞는지 확인
+- 실패 시 CPU fallback으로 동작할 수 있으므로 provider 상태를 GUI에서 확인
+
+## 라이선스 메모
+
+YOLO26 모델 사용에는 Ultralytics 라이선스 조건이 적용될 수 있습니다. 상업 배포 전에는 AGPL-3.0 또는 별도 상업 라이선스 조건을 직접 검토하세요.

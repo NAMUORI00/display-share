@@ -9,6 +9,7 @@
 #include <opencv2/imgproc.hpp>
 #include "core/ConfigManager.h"
 #include "capture/CenterRegionCapture.h"
+#include "detection/YOLO26OnnxRuntimeInference.h"
 #include "monitoring/SimpleMetrics.h"
 #include "capture/ScreenCaptureLiteDevice.h"
 #include <imgui.h>
@@ -155,8 +156,7 @@ public:
     // 현대화된 GUI 상태 접근자 (320x320 ROI 최적화)
     bool IsCaptureEnabled() const { return m_captureEnabled; }
     bool IsHSVDetectionEnabled() const { return m_hsvEnabled; }
-    bool IsYOLODetectionEnabled() const { return m_yoloEnabled; }
-    bool IsYOLOv11DetectionEnabled() const { return m_yolov11Enabled; }
+    bool IsYOLODetectionEnabled() const { return m_yolo26Enabled; }
     bool ShouldShowROIOverlay() const { return m_showROIOverlay; }
     bool ShouldShowDetectionStats() const { return m_showDetectionStats; }
     
@@ -164,11 +164,11 @@ public:
     cv::Scalar GetHSVLowerBound() const { return cv::Scalar(m_hsvLower[0], m_hsvLower[1], m_hsvLower[2]); }
     cv::Scalar GetHSVUpperBound() const { return cv::Scalar(m_hsvUpper[0], m_hsvUpper[1], m_hsvUpper[2]); }
     
-    // YOLO v11 설정 접근자
-    std::string GetYOLOv11ModelPath() const { return std::string(m_yolov11ModelPath); }
-    std::string GetYOLOv11ClassNamesPath() const { return std::string(m_yolov11ClassNamesPath); }
-    float GetYOLOv11Confidence() const { return m_yolov11Confidence; }
-    float GetYOLOv11NMSThreshold() const { return m_yolov11NMS; }
+    // YOLO26 설정 접근자
+    std::string GetYOLO26ModelPath() const { return std::string(m_yolo26ModelPath); }
+    std::string GetYOLO26ClassNamesPath() const { return std::string(m_yolo26ClassNamesPath); }
+    float GetYOLO26Confidence() const { return m_yolo26Confidence; }
+    int GetYOLO26SelectedGpuId() const { return m_yolo26SelectedGpuId; }
     
     // 성능 및 ROI 정보 접근자
     float GetTargetFPS() const { return m_targetFPS; }
@@ -212,6 +212,9 @@ private:
     void ApplyConfiguration();
     void UpdateConfigurationFromGui();
     void AutoSaveConfiguration();
+    bool InitializeYOLO26Detector();
+    bool ReloadYOLO26Detector();
+    void RefreshYOLO26Providers();
     
     // 검출 헬퍼 함수들
     void PerformHSVDetection(const cv::Mat& roi, std::vector<cv::Point>& detections);
@@ -250,22 +253,31 @@ private:
     // 현대화된 GUI 상태
     bool m_captureEnabled = false;
     bool m_hsvEnabled = true;
-    bool m_yoloEnabled = true;       // YOLO 기본 활성화
+    bool m_yolo26Enabled = true;
     bool m_showAboutDialog = false;
     bool m_showROIOverlay = true;    // ROI 오버레이 표시
     bool m_showDetectionStats = true; // 검출 통계 표시
-    bool m_showHelpOverlay = true;    // 첫 실행 도움말
+    bool m_showHelpOverlay = false;   // 도움말 (기본 숨김)
+    bool m_showLogConsole = false;    // 로그 콘솔 (기본 숨김, 메뉴 토글)
     
     // HSV 설정
     int m_hsvLower[3] = {140, 120, 180};
     int m_hsvUpper[3] = {160, 200, 255};
     
-    // 현대화된 YOLO v11 설정 (320x320 최적화)
-    char m_yolov11ModelPath[256] = "models/yolo11n.onnx";
-    char m_yolov11ClassNamesPath[256] = "models/coco.names";
-    float m_yolov11Confidence = 0.25f;
-    float m_yolov11NMS = 0.45f;
-    bool m_yolov11Enabled = true;
+    // YOLO26 설정
+    char m_yolo26ModelPath[256] = "models/yolo26n.onnx";
+    char m_yolo26ClassNamesPath[256] = "models/coco_classes.txt";
+    float m_yolo26Confidence = 0.25f;
+    int m_yolo26InputWidth = 640;
+    int m_yolo26InputHeight = 640;
+    int m_yolo26MaxDetections = 100;
+    int m_yolo26SelectedGpuId = 0;
+    std::vector<std::string> m_yolo26ExecutionProviders = {"cuda", "cpu"};
+    std::vector<YOLO26OnnxRuntimeInference::ProviderInfo> m_yolo26Providers;
+    std::string m_yolo26ProviderStatus = "disabled";
+    std::string m_yolo26LastError;
+    bool m_yolo26CpuFallback = false;
+    std::unique_ptr<YOLO26OnnxRuntimeInference> m_yolo26Detector;
     
     // 성능 데이터
     float m_currentFPS = 0.0f;

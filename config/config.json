@@ -10,7 +10,7 @@
         "ui_scale": 1.0
     },
     "performance": {
-        "enable_gpu_acceleration": false,
+        "enable_gpu_acceleration": true,
         "enable_multithreading": true,
         "frame_buffer_size": 5,
         "max_processing_threads": 4,
@@ -38,13 +38,22 @@
                 255
             ]
         },
-        "selected_algorithm": "hsv",
-        "yolo_detection": {
-            "confidence_threshold": 0.5,
-            "config_path": "models/yolo.cfg",
-            "enabled": false,
-            "model_path": "models/yolo.weights",
-            "nms_threshold": 0.4
+        "selected_algorithm": "yolo26",
+        "yolo26_detection": {
+            "enabled": true,
+            "onnx_model_path": "models/yolo26n.onnx",
+            "class_names_path": "models/coco_classes.txt",
+            "confidence_threshold": 0.25,
+            "max_detections": 100,
+            "input_size": [
+                640,
+                640
+            ],
+            "execution_providers": [
+                "cuda",
+                "cpu"
+            ],
+            "selected_gpu_id": 0
         }
     }
 }

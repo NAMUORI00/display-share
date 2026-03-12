@@ -15,7 +15,7 @@ json ConfigTestHelper::createDefaultTestConfig() {
             {"mode", "production_mode"}
         }},
         {"vision_algorithms", {
-            {"selected_algorithm", "hsv"},
+            {"selected_algorithm", "yolo26"},
             {"hsv_tracking", {
                 {"enabled", true},
                 {"lower_bound", json::array({140, 120, 180})},
@@ -23,12 +23,15 @@ json ConfigTestHelper::createDefaultTestConfig() {
                 {"morphology_kernel_size", 3},
                 {"min_contour_area", 100}
             }},
-            {"yolo_detection", {
-                {"enabled", false},
-                {"model_path", "models/yolo.weights"},
-                {"config_path", "models/yolo.cfg"},
-                {"confidence_threshold", 0.5},
-                {"nms_threshold", 0.4}
+            {"yolo26_detection", {
+                {"enabled", true},
+                {"onnx_model_path", "models/yolo26n.onnx"},
+                {"class_names_path", "models/coco_classes.txt"},
+                {"confidence_threshold", 0.25},
+                {"max_detections", 100},
+                {"input_size", json::array({640, 640})},
+                {"execution_providers", json::array({"cuda", "cpu"})},
+                {"selected_gpu_id", 0}
             }}
         }},
         {"analytics", {
@@ -46,7 +49,7 @@ json ConfigTestHelper::createDefaultTestConfig() {
             {"enable_multithreading", true},
             {"max_processing_threads", 4},
             {"frame_buffer_size", 5},
-            {"enable_gpu_acceleration", false}
+            {"enable_gpu_acceleration", true}
         }}
     };
 }
@@ -60,16 +63,21 @@ json ConfigTestHelper::createMinimalValidConfig() {
             {"mode", "educational_only"}
         }},
         {"vision_algorithms", {
-            {"selected_algorithm", "hsv"},
+            {"selected_algorithm", "yolo26"},
             {"hsv_tracking", {
                 {"enabled", true},
                 {"lower_bound", json::array({0, 0, 0})},
                 {"upper_bound", json::array({179, 255, 255})}
             }},
-            {"yolo_detection", {
-                {"enabled", false},
-                {"model_path", "test.weights"},
-                {"config_path", "test.cfg"}
+            {"yolo26_detection", {
+                {"enabled", true},
+                {"onnx_model_path", "models/yolo26n.onnx"},
+                {"class_names_path", "models/coco_classes.txt"},
+                {"confidence_threshold", 0.25},
+                {"max_detections", 10},
+                {"input_size", json::array({640, 640})},
+                {"execution_providers", json::array({"cuda", "cpu"})},
+                {"selected_gpu_id", 0}
             }}
         }},
         {"analytics", {
@@ -98,6 +106,16 @@ json ConfigTestHelper::createInvalidConfig() {
             {"selected_algorithm", "invalid_algorithm"},  // 잘못된 알고리즘
             {"hsv_tracking", {
                 {"lower_bound", json::array({-10, 300, 400})}  // 범위 초과
+            }},
+            {"yolo26_detection", {
+                {"enabled", true},
+                {"onnx_model_path", ""},
+                {"class_names_path", ""},
+                {"confidence_threshold", 1.5},
+                {"max_detections", 0},
+                {"input_size", json::array({0, 0})},
+                {"execution_providers", json::array()},
+                {"selected_gpu_id", -1}
             }}
         }}
     };
@@ -114,10 +132,10 @@ json ConfigTestHelper::createYOLOTestConfig(const std::string& model_path,
                                            const std::string& config_path, 
                                            double confidence) {
     json config = createDefaultTestConfig();
-    config["vision_algorithms"]["yolo_detection"]["enabled"] = true;
-    config["vision_algorithms"]["yolo_detection"]["model_path"] = model_path;
-    config["vision_algorithms"]["yolo_detection"]["config_path"] = config_path;
-    config["vision_algorithms"]["yolo_detection"]["confidence_threshold"] = confidence;
+    config["vision_algorithms"]["yolo26_detection"]["enabled"] = true;
+    config["vision_algorithms"]["yolo26_detection"]["onnx_model_path"] = model_path;
+    config["vision_algorithms"]["yolo26_detection"]["class_names_path"] = config_path;
+    config["vision_algorithms"]["yolo26_detection"]["confidence_threshold"] = confidence;
     return config;
 }
 
@@ -217,6 +235,16 @@ json ConfigTestHelper::createConfigWithOutOfRangeValues() {
                 {"enabled", true},
                 {"lower_bound", json::array({-50, 300, 400})},  // H: -50 (범위: 0-179), S,V: 300,400 (범위: 0-255)
                 {"upper_bound", json::array({200, 500, 600})}   // 모든 값이 범위 초과
+            }},
+            {"yolo26_detection", {
+                {"enabled", true},
+                {"onnx_model_path", ""},
+                {"class_names_path", ""},
+                {"confidence_threshold", 5.0},
+                {"max_detections", -1},
+                {"input_size", json::array({-1, -1})},
+                {"execution_providers", json::array()},
+                {"selected_gpu_id", -3}
             }}
         }},
         {"performance", {
@@ -229,16 +257,16 @@ json ConfigTestHelper::createConfigWithOutOfRangeValues() {
 json ConfigTestHelper::createDefaultSchema() {
     return json{
         {"type", "object"},
-        {"required", json::array({"educational_framework", "vision_algorithms", "analytics", "gui", "performance"})},
+        {"required", json::array({"production_system", "vision_algorithms", "analytics", "gui", "performance"})},
         {"properties", {
-            {"educational_framework", {
+            {"production_system", {
                 {"type", "object"},
                 {"required", json::array({"name", "version", "purpose", "mode"})},
                 {"properties", {
                     {"name", {"type", "string"}},
                     {"version", {"type", "string"}},
                     {"purpose", {"type", "string"}},
-                    {"mode", {"type", "string", "enum", json::array({"educational_only"})}}
+                    {"mode", {"type", "string", "enum", json::array({"production_mode"})}}
                 }}
             }}
         }}

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.28...3.30)
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
 # Export compile commands for IDE/intellisense
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -50,6 +54,101 @@ endif()
 
 # Create bin directory in build folder for output
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# ONNX Runtime GPU prebuilt bundle (Windows-first)
+option(SC_AUTO_DOWNLOAD_ONNXRUNTIME "Automatically download the pinned ONNX Runtime GPU package when missing" ON)
+set(ORT_VERSION "1.20.1" CACHE STRING "Pinned ONNX Runtime GPU package version")
+set(ORT_PACKAGE_NAME "onnxruntime-win-x64-gpu-${ORT_VERSION}")
+set(ORT_DOWNLOAD_URL
+    "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${ORT_PACKAGE_NAME}.zip"
+    CACHE STRING "Download URL for the pinned ONNX Runtime GPU package")
+set(ORT_DOWNLOAD_ROOT "${CMAKE_BINARY_DIR}/_deps/onnxruntime")
+set(ORT_ROOT "${ORT_DOWNLOAD_ROOT}/win-x64-gpu" CACHE PATH
+    "Path to the ONNX Runtime GPU package")
+set(ORT_INCLUDE_DIR "${ORT_ROOT}/include")
+set(ORT_LIB_PATH "${ORT_ROOT}/lib/onnxruntime.lib")
+set(ORT_CXX_HEADER "${ORT_INCLUDE_DIR}/onnxruntime_cxx_api.h")
+set(ORT_DLL_PATH "${ORT_ROOT}/bin/onnxruntime.dll")
+set(ORT_ARCHIVE_PATH "${ORT_DOWNLOAD_ROOT}/${ORT_PACKAGE_NAME}.zip")
+
+if(NOT EXISTS "${ORT_DLL_PATH}")
+    set(ORT_DLL_PATH "${ORT_ROOT}/lib/onnxruntime.dll")
+endif()
+
+function(sc_ensure_onnxruntime_bundle)
+    if(EXISTS "${ORT_CXX_HEADER}" AND EXISTS "${ORT_LIB_PATH}" AND EXISTS "${ORT_DLL_PATH}")
+        return()
+    endif()
+
+    if(NOT SC_AUTO_DOWNLOAD_ONNXRUNTIME)
+        message(FATAL_ERROR
+            "ONNX Runtime bundle not found at ${ORT_ROOT}. "
+            "Set ORT_ROOT manually or enable SC_AUTO_DOWNLOAD_ONNXRUNTIME.")
+    endif()
+
+    file(MAKE_DIRECTORY "${ORT_DOWNLOAD_ROOT}")
+
+    if(NOT EXISTS "${ORT_ARCHIVE_PATH}")
+        message(STATUS "Downloading ${ORT_PACKAGE_NAME} from ${ORT_DOWNLOAD_URL}")
+        file(DOWNLOAD
+            "${ORT_DOWNLOAD_URL}"
+            "${ORT_ARCHIVE_PATH}"
+            SHOW_PROGRESS
+            STATUS ort_download_status
+            TLS_VERIFY ON)
+        list(GET ort_download_status 0 ort_download_code)
+        list(GET ort_download_status 1 ort_download_message)
+        if(NOT ort_download_code EQUAL 0)
+            message(FATAL_ERROR
+                "Failed to download ONNX Runtime GPU package: ${ort_download_message}")
+        endif()
+    else()
+        message(STATUS "Using cached ONNX Runtime archive: ${ORT_ARCHIVE_PATH}")
+    endif()
+
+    set(ORT_EXTRACTED_DIR "${ORT_DOWNLOAD_ROOT}/${ORT_PACKAGE_NAME}")
+    if(NOT EXISTS "${ORT_EXTRACTED_DIR}")
+        file(ARCHIVE_EXTRACT
+            INPUT "${ORT_ARCHIVE_PATH}"
+            DESTINATION "${ORT_DOWNLOAD_ROOT}")
+    endif()
+
+    if(NOT EXISTS "${ORT_ROOT}" AND EXISTS "${ORT_EXTRACTED_DIR}")
+        file(RENAME "${ORT_EXTRACTED_DIR}" "${ORT_ROOT}")
+    endif()
+
+    if(NOT EXISTS "${ORT_CXX_HEADER}" OR NOT EXISTS "${ORT_LIB_PATH}" OR NOT EXISTS "${ORT_DLL_PATH}")
+        message(FATAL_ERROR
+            "ONNX Runtime GPU package is incomplete after download/extract. "
+            "Expected files under ${ORT_ROOT}")
+    endif()
+endfunction()
+
+sc_ensure_onnxruntime_bundle()
+
+if(NOT EXISTS "${ORT_CXX_HEADER}")
+    message(FATAL_ERROR "ONNX Runtime headers not found. Place the Windows GPU package under ${ORT_ROOT}")
+endif()
+
+if(NOT EXISTS "${ORT_LIB_PATH}")
+    message(FATAL_ERROR "onnxruntime.lib not found. Place the Windows GPU package under ${ORT_ROOT}")
+endif()
+
+if(NOT EXISTS "${ORT_DLL_PATH}")
+    message(FATAL_ERROR "onnxruntime.dll not found. Place the Windows GPU package under ${ORT_ROOT}")
+endif()
+
+add_library(onnxruntime SHARED IMPORTED GLOBAL)
+set_target_properties(onnxruntime PROPERTIES
+    IMPORTED_IMPLIB "${ORT_LIB_PATH}"
+    IMPORTED_LOCATION "${ORT_DLL_PATH}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ORT_INCLUDE_DIR}"
+)
+
+file(GLOB ORT_RUNTIME_DLLS
+    "${ORT_ROOT}/bin/*.dll"
+    "${ORT_ROOT}/lib/*.dll"
+)
 
 # =============================================================================
 # SUBMODULE DEPENDENCIES
@@ -107,11 +206,11 @@ set(BUILD_opencv_video OFF CACHE BOOL "" FORCE)
 set(BUILD_opencv_gapi OFF CACHE BOOL "" FORCE)
 set(BUILD_opencv_python3 OFF CACHE BOOL "" FORCE)
 
-# Enable essential modules including DNN for YOLO support
+# Enable essential modules
 set(BUILD_opencv_core ON CACHE BOOL "" FORCE)
 set(BUILD_opencv_imgproc ON CACHE BOOL "" FORCE)
 set(BUILD_opencv_imgcodecs ON CACHE BOOL "" FORCE)
-set(BUILD_opencv_dnn ON CACHE BOOL "" FORCE)          # YOLO v11 지원을 위해 활성화
+set(BUILD_opencv_dnn OFF CACHE BOOL "" FORCE)
 set(BUILD_opencv_videoio OFF CACHE BOOL "" FORCE)     # Windows GUID_NULL 에러로 임시 비활성화
 set(BUILD_opencv_highgui OFF CACHE BOOL "" FORCE)     # Windows SDK 충돌로 비활성화 유지
 set(BUILD_opencv_features2d OFF CACHE BOOL "" FORCE)
@@ -122,9 +221,9 @@ set(BUILD_opencv_photo OFF CACHE BOOL "" FORCE)
 
 message(STATUS "OpenCV 최적화 구성 완료:")
 message(STATUS "  - 필수 모듈: core, imgproc, imgcodecs")
-message(STATUS "  - AI 모듈: DNN (YOLO v11 지원)")
+message(STATUS "  - YOLO26 추론: ONNX Runtime GPU bundle")
 message(STATUS "  - 임시 비활성화: videoio (Windows GUID_NULL 에러)")
-message(STATUS "  - 비활성화된 모듈: highgui, features2d, calib3d, flann, ml, photo (Windows 호환성)")
+message(STATUS "  - 비활성화된 모듈: dnn, highgui, features2d, calib3d, flann, ml, photo (Windows 호환성)")
 
 # Override OpenCV's internal minimal CMake version.
 # 이유: OpenCV 최상위 CMakeLists.txt 내부에서 별도 cmake_minimum_required(${MIN_VER_CMAKE}) 호출 시
@@ -146,7 +245,6 @@ set(OpenCV_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/external/opencv/modules/core/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/opencv/modules/imgproc/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/opencv/modules/imgcodecs/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/opencv/modules/dnn/include
     # ${CMAKE_CURRENT_SOURCE_DIR}/external/opencv/modules/videoio/include  # 임시 제거
 )
 
@@ -192,7 +290,7 @@ add_executable(${PROJECT_NAME}
 
     # Detection algorithms
     src/detection/HSVColorDetection.cpp
-    src/detection/YOLOv11TensorRTInference.cpp
+    src/detection/YOLO26OnnxRuntimeInference.cpp
 
     # Monitoring
     src/monitoring/SimpleMetrics.cpp
@@ -224,6 +322,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     include/factories/
     external/screen_capture_lite/include
     ${OpenCV_INCLUDE_DIRS}
+    ${ORT_INCLUDE_DIR}
 )
 
 # Link libraries (submodule-based) - Full GUI enabled
@@ -234,7 +333,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     opencv_core
     opencv_imgproc
     opencv_imgcodecs
-    opencv_dnn          # YOLO v11 지원을 위해 추가
+    onnxruntime
     # opencv_videoio    # Windows GUID_NULL 에러로 임시 제거
     nlohmann_json::nlohmann_json
     screen_capture_lite_static
@@ -257,7 +356,7 @@ if(WIN32)
     
     # Add Windows system libraries for static linking
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        kernel32 user32 gdi32 winspool comdlg32 advapi32 shell32 
+        kernel32 user32 gdi32 dxgi winspool comdlg32 advapi32 shell32 
         ole32 oleaut32 uuid odbc32 odbccp32
     )
     
@@ -274,6 +373,14 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     LINK_SEARCH_START_STATIC ON
     LINK_SEARCH_END_STATIC ON
 )
+
+foreach(runtime_dll IN LISTS ORT_RUNTIME_DLLS)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${runtime_dll}"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    )
+endforeach()
 
 # Add debug/release specific flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -314,7 +421,7 @@ add_library(${PROJECT_NAME}_lib STATIC
     
     # Detection algorithms (cleaned and simplified)
     src/detection/HSVColorDetection.cpp
-    src/detection/YOLOv11TensorRTInference.cpp  # DNN 모듈 활성화로 다시 포함
+    src/detection/YOLO26OnnxRuntimeInference.cpp
     
     # Simple monitoring system
     src/monitoring/SimpleMetrics.cpp
@@ -340,6 +447,7 @@ target_include_directories(${PROJECT_NAME}_lib PUBLIC
     include/factories/
     external/screen_capture_lite/include
     ${OpenCV_INCLUDE_DIRS}
+    ${ORT_INCLUDE_DIR}
 )
 
 # Link libraries for the library (submodule-based) - Full GUI enabled
@@ -350,7 +458,7 @@ target_link_libraries(${PROJECT_NAME}_lib PUBLIC
     opencv_core
     opencv_imgproc
     opencv_imgcodecs
-    opencv_dnn          # YOLO v11 지원을 위해 추가
+    onnxruntime
     # opencv_videoio    # Windows GUID_NULL 에러로 임시 제거
     nlohmann_json::nlohmann_json
     screen_capture_lite_static
@@ -378,7 +486,7 @@ endif()
 add_executable(${PROJECT_NAME}_tests
     tests/test_ConfigManager.cpp
     tests/test_CenterRegionCapture.cpp
-    tests/test_Phase5SystemValidation.cpp
+    tests/test_YOLO26OnnxRuntime.cpp
     tests/helpers/TestImageGenerator.cpp
     tests/helpers/ConfigTestHelper.cpp
     tests/mocks/MockScreenCapture.cpp
@@ -428,11 +536,20 @@ gtest_discover_tests(${PROJECT_NAME}_tests DISCOVERY_MODE PRE_TEST)
 set_target_properties(${PROJECT_NAME}_tests
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
 )
+
+foreach(runtime_dll IN LISTS ORT_RUNTIME_DLLS)
+    add_custom_command(TARGET ${PROJECT_NAME}_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${runtime_dll}"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}_tests>"
+    )
+endforeach()
 endif() # SC_ENABLE_TESTS
 
 message(STATUS "=== SmartScreenCapture Configuration Complete ===")
 message(STATUS "GUI: Fully Enabled (GLFW + ImGui + OpenGL3)")
 message(STATUS "Static Linking: Enabled (Single EXE)")
 message(STATUS "OpenCV: Minimal Core Modules")
+message(STATUS "YOLO26: ONNX Runtime (CUDA -> CPU fallback)")
 message(STATUS "Testing: Google Test Framework")
 message(STATUS "=================================================")
