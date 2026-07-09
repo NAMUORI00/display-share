@@ -1,5 +1,5 @@
 [package]
-name = "smartscreencapture"
+name = "display-share"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,4 +16,10 @@ pipeline = { path = "../../crates/pipeline" }
 telemetry = { path = "../../crates/telemetry" }
 tracing-subscriber.workspace = true
 ui = { path = "../../crates/ui" }
+vision-gpu = { path = "../../crates/vision-gpu" }
 wgpu.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
