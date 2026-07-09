@@ -1,0 +1,17 @@
+[package]
+name = "smartscreencapture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+capture-core = { path = "../../crates/capture-core" }
+capture-windows = { path = "../../crates/capture-windows" }
+config = { path = "../../crates/config" }
+eframe.workspace = true
+inference-dml = { path = "../../crates/inference-dml" }
+pipeline = { path = "../../crates/pipeline" }
+telemetry = { path = "../../crates/telemetry" }
+tracing-subscriber.workspace = true
+ui = { path = "../../crates/ui" }
