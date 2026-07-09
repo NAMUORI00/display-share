@@ -1,8 +1,8 @@
 {
   "production_system": {
-    "name": "Screen Share",
+    "name": "SmartScreenCapture",
     "version": "1.0.0",
-    "purpose": "Desktop screen sharing",
+    "purpose": "Local screen capture and vision analysis",
     "mode": "production_mode"
   },
   "vision_algorithms": {
@@ -62,13 +62,10 @@
     "no_hook": true,
     "obs_adapter_allowed": true
   },
-  "concealment": {
-    "enabled": true,
-    "blend_in_screen_share": true,
-    "exclude_windows_from_capture": true,
-    "quiet_logs": true,
-    "display_name": "Screen Share",
-    "window_title": "Screen Share",
-    "monitor_title": "Preview"
+  "privacy": {
+    "exclude_own_windows_from_capture": false,
+    "display_name": "SmartScreenCapture",
+    "window_title": "SmartScreenCapture",
+    "monitor_title": "SmartScreenCapture Preview"
   }
 }

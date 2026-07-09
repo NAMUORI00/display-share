@@ -1,6 +1,4 @@
-use capture_core::{
-    CaptureBackendKind, CaptureBackendPreference, CaptureError, CaptureTarget,
-};
+use capture_core::{CaptureBackendKind, CaptureBackendPreference, CaptureError, CaptureTarget};
 
 /// DXGI-only capture path. Preference does not select WGC; it only validates DXGI availability.
 pub fn resolve_backend(
@@ -15,10 +13,7 @@ pub fn resolve_backend(
     } else {
         Err(CaptureError::BackendUnavailable(format!(
             "Display session is not available for {} (adapter={:?}, output={:?}, device={:?})",
-            target.name,
-            target.adapter_index,
-            target.output_index,
-            target.device_name
+            target.name, target.adapter_index, target.output_index, target.device_name
         )))
     }
 }

@@ -115,16 +115,7 @@ impl D3d11TextureHandle {
             back: 1,
         };
         unsafe {
-            context.CopySubresourceRegion(
-                &texture,
-                0,
-                0,
-                0,
-                0,
-                &self.texture,
-                0,
-                Some(&src_box),
-            );
+            context.CopySubresourceRegion(&texture, 0, 0, 0, 0, &self.texture, 0, Some(&src_box));
         }
 
         Ok(Self::new(
@@ -142,12 +133,7 @@ impl D3d11TextureHandle {
             .immediate_context()
             .map_err(|err| VisionError::Other(err.to_string()))?;
         let src_desc = self.desc();
-        let staging = acquire_staging(
-            &device,
-            src_desc.Width,
-            src_desc.Height,
-            src_desc.Format,
-        )?;
+        let staging = acquire_staging(&device, src_desc.Width, src_desc.Height, src_desc.Format)?;
 
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
@@ -176,7 +162,13 @@ impl D3d11TextureHandle {
         unsafe {
             context.Unmap(&staging, 0);
         }
-        release_staging(device, src_desc.Width, src_desc.Height, src_desc.Format, staging);
+        release_staging(
+            device,
+            src_desc.Width,
+            src_desc.Height,
+            src_desc.Format,
+            staging,
+        );
 
         Ok(buffer)
     }

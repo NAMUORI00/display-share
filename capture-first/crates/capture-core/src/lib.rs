@@ -18,19 +18,14 @@ pub enum CaptureBackendKind {
     ObsAdapter,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CaptureBackendPreference {
+    #[default]
     Auto,
     WindowsGraphicsCapture,
     DxgiDuplication,
     ObsAdapter,
-}
-
-impl Default for CaptureBackendPreference {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,11 +173,11 @@ impl Default for CompatibilityPolicy {
     }
 }
 
-/// Operator-facing product strings (screen-share class; not project codenames).
+/// Operator-facing product strings.
 pub mod identity {
-    pub const APP_DISPLAY_NAME: &str = "Screen Share";
-    pub const APP_WINDOW_TITLE: &str = "Screen Share";
-    pub const MONITOR_WINDOW_TITLE: &str = "Preview";
+    pub const APP_DISPLAY_NAME: &str = "SmartScreenCapture";
+    pub const APP_WINDOW_TITLE: &str = "SmartScreenCapture";
+    pub const MONITOR_WINDOW_TITLE: &str = "SmartScreenCapture Preview";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,10 +221,10 @@ impl Default for CaptureOptions {
 }
 
 impl CaptureOptions {
-    /// Screen-share class defaults: no cursor, no WGC border, no hooks, DXGI preference.
-    /// Always applied at config bind and capture start (cannot be disabled).
+    /// Normalize options to the currently implemented display-capture backend.
+    /// Hooks are never allowed; WGC preference falls back to DXGI because WGC is not active here.
     #[must_use]
-    pub fn sanitize_for_privacy(mut self) -> Self {
+    pub fn normalize_for_display_capture(mut self) -> Self {
         self.include_cursor = false;
         self.draw_border = false;
         self.compatibility.no_hook = true;
@@ -636,9 +631,19 @@ pub trait InferenceBackend: Send + Sync {
 #[must_use]
 pub fn backend_kind_label(kind: CaptureBackendKind) -> &'static str {
     match kind {
-        CaptureBackendKind::WindowsGraphicsCapture => "Other",
-        CaptureBackendKind::DxgiDuplication => "Display",
-        CaptureBackendKind::ObsAdapter => "Other",
+        CaptureBackendKind::WindowsGraphicsCapture => "WGC",
+        CaptureBackendKind::DxgiDuplication => "DXGI",
+        CaptureBackendKind::ObsAdapter => "OBS",
+    }
+}
+
+#[must_use]
+pub fn backend_preference_label(preference: CaptureBackendPreference) -> &'static str {
+    match preference {
+        CaptureBackendPreference::Auto => "Auto",
+        CaptureBackendPreference::WindowsGraphicsCapture => "Prefer WGC",
+        CaptureBackendPreference::DxgiDuplication => "Force DXGI",
+        CaptureBackendPreference::ObsAdapter => "OBS adapter",
     }
 }
 
@@ -647,7 +652,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_for_privacy_forces_share_class_defaults() {
+    fn normalize_for_display_capture_forces_supported_defaults() {
         let options = CaptureOptions {
             include_cursor: true,
             draw_border: true,
@@ -659,7 +664,7 @@ mod tests {
             },
             backend_preference: CaptureBackendPreference::WindowsGraphicsCapture,
         }
-        .sanitize_for_privacy();
+        .normalize_for_display_capture();
 
         assert!(!options.include_cursor);
         assert!(!options.draw_border);
@@ -668,15 +673,5 @@ mod tests {
             options.backend_preference,
             CaptureBackendPreference::DxgiDuplication
         );
-    }
-}
-
-#[must_use]
-pub fn backend_preference_label(preference: CaptureBackendPreference) -> &'static str {
-    match preference {
-        CaptureBackendPreference::Auto => "Auto",
-        CaptureBackendPreference::WindowsGraphicsCapture => "Prefer WGC",
-        CaptureBackendPreference::DxgiDuplication => "Force DXGI",
-        CaptureBackendPreference::ObsAdapter => "OBS adapter",
     }
 }

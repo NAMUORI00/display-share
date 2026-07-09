@@ -87,7 +87,7 @@ impl DxgiDuplicationBackend {
                     adapter_name: Some(output.adapter_name.clone()),
                     adapter_index: Some(output.adapter_index),
                     output_index: Some(output.output_index),
-                    // DXGI-only path — no WGC in available/preferred.
+                    // DXGI is the only active backend in this crate.
                     available_backends: vec![CaptureBackendKind::DxgiDuplication],
                     preferred_backend: CaptureBackendKind::DxgiDuplication,
                 }
@@ -112,7 +112,7 @@ impl CaptureBackend for DxgiDuplicationBackend {
             return Err(CaptureError::UnsupportedTarget(target.id.clone()));
         }
 
-        let options = options.sanitize_for_privacy();
+        let options = options.normalize_for_display_capture();
         let binding = resolve_output_binding(target)?;
         let (sender, receiver) = bounded(options.buffer_depth.max(1));
         let (preview_tx, preview_rx) = bounded(PREVIEW_CHANNEL_DEPTH);
@@ -133,7 +133,6 @@ impl CaptureBackend for DxgiDuplicationBackend {
         let thread_preview_enabled = preview_enabled.clone();
         let thread_analysis_enabled = analysis_enabled.clone();
         let thread_last_error = last_error.clone();
-        // Unnamed thread — avoid capture-branded thread names in process tools.
         let handle = thread::spawn(move || {
             let result = run_dxgi_capture_loop(
                 binding,
@@ -189,19 +188,18 @@ fn resolve_output_binding(target: &CaptureTarget) -> Result<OutputBinding, Captu
         )));
     }
 
-    if let Some(device_name) = target.device_name.as_deref() {
-        if let Some(matched) = outputs.iter().find(|o| o.device_name == device_name) {
-            return Ok(binding_from_output(matched));
-        }
+    if let Some(device_name) = target.device_name.as_deref()
+        && let Some(matched) = outputs.iter().find(|o| o.device_name == device_name)
+    {
+        return Ok(binding_from_output(matched));
     }
 
-    if let (Some(adapter_index), Some(output_index)) = (target.adapter_index, target.output_index) {
-        if let Some(matched) = outputs
+    if let (Some(adapter_index), Some(output_index)) = (target.adapter_index, target.output_index)
+        && let Some(matched) = outputs
             .iter()
             .find(|o| o.adapter_index == adapter_index && o.output_index == output_index)
-        {
-            return Ok(binding_from_output(matched));
-        }
+    {
+        return Ok(binding_from_output(matched));
     }
 
     Err(CaptureError::BackendUnavailable(format!(
@@ -222,10 +220,10 @@ fn binding_from_output(output: &DxgiOutputInfo) -> OutputBinding {
 /// Re-resolve binding by device_name after mode changes (indices may shift).
 fn refresh_binding(binding: &OutputBinding) -> Result<OutputBinding, CaptureError> {
     let outputs = enumerate_dxgi_outputs()?;
-    if let Some(device_name) = binding.device_name.as_deref() {
-        if let Some(matched) = outputs.iter().find(|o| o.device_name == device_name) {
-            return Ok(binding_from_output(matched));
-        }
+    if let Some(device_name) = binding.device_name.as_deref()
+        && let Some(matched) = outputs.iter().find(|o| o.device_name == device_name)
+    {
+        return Ok(binding_from_output(matched));
     }
     if let Some(matched) = outputs.iter().find(|o| {
         o.adapter_index == binding.adapter_index && o.output_index == binding.output_index
@@ -320,6 +318,7 @@ impl Drop for DxgiCaptureSession {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_dxgi_capture_loop(
     mut binding: OutputBinding,
     options: CaptureOptions,
@@ -363,12 +362,12 @@ fn run_dxgi_capture_loop(
                 };
 
                 // Same-thread D3D11 readback only — never from UI/vision worker.
-                let want_preview =
-                    preview_enabled.load(Ordering::Relaxed) && last_preview_at.elapsed() >= PREVIEW_MIN_INTERVAL;
+                let want_preview = preview_enabled.load(Ordering::Relaxed)
+                    && last_preview_at.elapsed() >= PREVIEW_MIN_INTERVAL;
                 let want_analysis = analysis_enabled.load(Ordering::Relaxed)
                     && last_analysis_at.elapsed() >= ANALYSIS_MIN_INTERVAL;
-                if want_preview || want_analysis {
-                    if emit_cpu_side_channels(
+                if (want_preview || want_analysis)
+                    && emit_cpu_side_channels(
                         &packet,
                         want_preview,
                         want_analysis,
@@ -376,13 +375,12 @@ fn run_dxgi_capture_loop(
                         &analysis_tx,
                     )
                     .is_ok()
-                    {
-                        if want_preview {
-                            last_preview_at = Instant::now();
-                        }
-                        if want_analysis {
-                            last_analysis_at = Instant::now();
-                        }
+                {
+                    if want_preview {
+                        last_preview_at = Instant::now();
+                    }
+                    if want_analysis {
+                        last_analysis_at = Instant::now();
                     }
                 }
 
@@ -521,7 +519,9 @@ struct DxgiDuplicationSession {
     frame_pool_size: (u32, u32),
 }
 
-fn open_duplication_session(binding: &OutputBinding) -> Result<DxgiDuplicationSession, CaptureError> {
+fn open_duplication_session(
+    binding: &OutputBinding,
+) -> Result<DxgiDuplicationSession, CaptureError> {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
 
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }
@@ -541,12 +541,12 @@ fn open_duplication_session(binding: &OutputBinding) -> Result<DxgiDuplicationSe
     let output_desc = unsafe { output.GetDesc() }
         .map_err(|err| CaptureError::BackendUnavailable(err.to_string()))?;
     let actual_device_name = utf16_to_string(&output_desc.DeviceName);
-    if let Some(expected_device_name) = binding.device_name.as_deref() {
-        if actual_device_name != expected_device_name {
-            return Err(CaptureError::BackendUnavailable(format!(
-                "DXGI output changed from {expected_device_name} to {actual_device_name}"
-            )));
-        }
+    if let Some(expected_device_name) = binding.device_name.as_deref()
+        && actual_device_name != expected_device_name
+    {
+        return Err(CaptureError::BackendUnavailable(format!(
+            "DXGI output changed from {expected_device_name} to {actual_device_name}"
+        )));
     }
 
     let output1: IDXGIOutput1 = output

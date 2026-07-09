@@ -8,7 +8,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::core::PCWSTR;
 
-/// Monitor metadata for target labels (Win32 display APIs — no WGC stack).
+/// Monitor metadata for target labels (Win32 display APIs).
 #[derive(Debug, Clone)]
 pub struct DisplayMonitorInfo {
     pub native_index: usize,
@@ -31,7 +31,7 @@ pub struct DxgiOutputInfo {
     pub size: Size2D,
 }
 
-/// Enumerate attached displays via Win32 (screen-share class; no windows-capture / WGC).
+/// Enumerate attached displays via Win32.
 pub fn enumerate_display_monitors() -> Result<Vec<DisplayMonitorInfo>, CaptureError> {
     let mut result = Vec::new();
     let mut adapter_index = 0u32;
@@ -66,20 +66,11 @@ pub fn enumerate_display_monitors() -> Result<Vec<DisplayMonitorInfo>, CaptureEr
                 .chain(std::iter::once(0))
                 .collect();
             let has_monitor = unsafe {
-                EnumDisplayDevicesW(
-                    PCWSTR(device_name_wide.as_ptr()),
-                    0,
-                    &mut monitor,
-                    0,
-                )
+                EnumDisplayDevicesW(PCWSTR(device_name_wide.as_ptr()), 0, &mut monitor, 0)
             };
             if has_monitor.as_bool() {
                 let name = utf16_to_string(&monitor.DeviceString);
-                if name.is_empty() {
-                    None
-                } else {
-                    Some(name)
-                }
+                if name.is_empty() { None } else { Some(name) }
             } else {
                 None
             }

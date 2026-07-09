@@ -1,15 +1,13 @@
-//! Windows capture — DXGI Desktop Duplication only (display-share class).
+//! Windows capture — DXGI Desktop Duplication only.
 //! Shared D3D11 device factory keeps crop/preprocess on the same adapter when possible.
-//! No hooks, no WGC start path (no capture border).
+//! No hooks; WGC is not wired into this crate.
 
 mod device;
 mod dxgi;
 mod enumerate;
 mod resolve;
 
-use capture_core::{
-    CaptureBackend, CaptureError, CaptureOptions, CaptureSession, CaptureTarget,
-};
+use capture_core::{CaptureBackend, CaptureError, CaptureOptions, CaptureSession, CaptureTarget};
 
 use crate::dxgi::DxgiDuplicationBackend;
 use crate::enumerate::enumerate_display_monitors;
@@ -41,9 +39,9 @@ impl CaptureBackend for WindowsCaptureBackend {
         target: &CaptureTarget,
         options: CaptureOptions,
     ) -> Result<Box<dyn CaptureSession>, CaptureError> {
-        // Always sanitize: no cursor, no border, no hooks, DXGI preference.
-        let options = options.sanitize_for_privacy();
-        // DXGI-only path — no WGC fallback. Preference is ignored for API selection.
+        // Normalize to the supported DXGI display-capture path.
+        let options = options.normalize_for_display_capture();
+        // DXGI-only path. WGC is not wired into this crate.
         let _ = resolve_backend(target, options.backend_preference)?;
         self.dxgi.start(target, options)
     }
@@ -93,9 +91,8 @@ mod tests {
     fn prefer_wgc_still_resolves_to_dxgi() {
         let target = make_target(vec![CaptureBackendKind::DxgiDuplication]);
 
-        let backend =
-            resolve_backend(&target, CaptureBackendPreference::WindowsGraphicsCapture)
-                .expect("DXGI-only path ignores WGC preference");
+        let backend = resolve_backend(&target, CaptureBackendPreference::WindowsGraphicsCapture)
+            .expect("DXGI-only path resolves WGC preference to DXGI");
 
         assert_eq!(backend, CaptureBackendKind::DxgiDuplication);
     }
@@ -104,9 +101,8 @@ mod tests {
     fn missing_dxgi_fails_clearly() {
         let target = make_target(vec![CaptureBackendKind::WindowsGraphicsCapture]);
 
-        let error = resolve_backend(&target, CaptureBackendPreference::Auto).expect_err(
-            "DXGI must be available",
-        );
+        let error = resolve_backend(&target, CaptureBackendPreference::Auto)
+            .expect_err("DXGI must be available");
 
         assert!(error.to_string().contains("Display session"));
     }
@@ -121,9 +117,7 @@ mod tests {
         use crate::WindowsCaptureBackend;
 
         let backend = WindowsCaptureBackend::new();
-        let targets = backend
-            .enumerate_targets()
-            .expect("enumerate displays");
+        let targets = backend.enumerate_targets().expect("enumerate displays");
         assert!(
             !targets.is_empty(),
             "no displays found — cannot smoke-test capture"
@@ -146,7 +140,7 @@ mod tests {
             .unwrap_or(&targets[0])
             .clone();
 
-        // Deliberately "dirty" options — sanitize must force share-class defaults.
+        // Deliberately unsupported options — normalization must force supported defaults.
         let options = CaptureOptions {
             include_cursor: true,
             draw_border: true,
@@ -186,15 +180,11 @@ mod tests {
         }
 
         session.stop().expect("stop session");
-        assert!(
-            got_frame,
-            "no capture frames within 5s on {}",
-            target.name
-        );
+        assert!(got_frame, "no capture frames within 5s on {}", target.name);
         assert!(frames >= 1, "expected frame_number >= 1, got {frames}");
         let size = last_size.expect("frame size");
         eprintln!(
-            "smoke: ok backend=DxgiDuplication target={} frames>={} size={}x{} (sanitize forced DXGI despite WGC preference)",
+            "smoke: ok backend=DxgiDuplication target={} frames>={} size={}x{} (normalization forced DXGI despite WGC preference)",
             target.name, frames, size.width, size.height
         );
     }

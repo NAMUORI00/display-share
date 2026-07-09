@@ -12,7 +12,9 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
     ID3D11DeviceContext,
 };
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1,
+};
 use windows::core::Interface;
 
 #[derive(Clone)]
@@ -44,7 +46,9 @@ impl SharedD3d11Device {
 /// Process-wide cache keyed by adapter index (optional reuse across sessions).
 static DEVICE_CACHE: Mutex<Vec<(u32, Arc<SharedD3d11Device>)>> = Mutex::new(Vec::new());
 
-pub fn shared_device_for_adapter(adapter_index: u32) -> Result<Arc<SharedD3d11Device>, CaptureError> {
+pub fn shared_device_for_adapter(
+    adapter_index: u32,
+) -> Result<Arc<SharedD3d11Device>, CaptureError> {
     let mut cache = DEVICE_CACHE.lock();
     if let Some((_, existing)) = cache.iter().find(|(idx, _)| *idx == adapter_index) {
         return Ok(existing.clone());

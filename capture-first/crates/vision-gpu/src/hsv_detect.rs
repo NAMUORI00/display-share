@@ -240,12 +240,7 @@ fn get_bounding_rect(contour: &[(i32, i32)]) -> (i32, i32, i32, i32) {
         max_x = max_x.max(x);
         max_y = max_y.max(y);
     }
-    (
-        min_x,
-        min_y,
-        max_x - min_x + 1,
-        max_y - min_y + 1,
-    )
+    (min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
 }
 
 fn trace_contour(
