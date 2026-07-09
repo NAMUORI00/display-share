@@ -1,14 +1,14 @@
-**C_capture**
+**display-share**
 
-- [홈](Home)
-- [시작하기](시작하기)
-- [재현 가이드](재현-가이드)
-- [라이선스](라이선스)
-- [아키텍처](아키텍처)
-- [설정](설정)
-- [모델 가이드](모델-가이드)
-- [개발 현황](개발-현황)
+- [홈]({{ site.baseurl }}/)
+- [시작하기](시작하기.md)
+- [재현 가이드](재현-가이드.md)
+- [라이선스](라이선스.md)
+- [아키텍처](아키텍처.md)
+- [설정](설정.md)
+- [모델 가이드](모델-가이드.md)
+- [개발 현황](개발-현황.md)
 
 ---
 
-[소스 (main)](https://github.com/NAMUORI00/C_capture/tree/main)
+[소스 (main)](https://github.com/NAMUORI00/display-share/tree/main)
