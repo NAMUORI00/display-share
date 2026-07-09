@@ -2,9 +2,9 @@
 //! Keeps `smartscreencapture` as a thin eframe shell (no MainInterface god-class).
 
 use capture_core::{
-    CaptureFrame, CaptureRoi, CpuBuffer, DetectionResult, HsvMaskStats, HsvSettings,
-    InferenceBackend, InferenceSettings, ModelInputSize, ProviderState, Size2D, TensorInputHandle,
-    VisionPipeline,
+    AnalysisFrame, CaptureFrame, CaptureRoi, CpuBuffer, DetectionResult, HsvMaskStats, HsvSettings,
+    InferenceBackend, InferenceSettings, ModelInputSize, ProcessedFrame, ProviderState, Size2D,
+    TensorInputHandle, VisionPipeline,
 };
 use config::RuntimeBindings;
 use thiserror::Error;
@@ -12,6 +12,10 @@ use vision_gpu::GpuVisionPipeline;
 
 /// Default operator capture ROI (320×320 center crop contract).
 pub const DEFAULT_CAPTURE_ROI: Size2D = Size2D::new(320, 320);
+
+/// Long-edge cap for full-frame UI preview readback.
+/// Keep small — preview is operator UX, not the capture hot path.
+pub const PREVIEW_MAX_LONG_EDGE: u32 = 960;
 
 #[derive(Debug, Error)]
 pub enum PipelineError {
@@ -27,14 +31,25 @@ pub enum PipelineError {
 pub struct PipelineReport {
     pub hsv: HsvMaskStats,
     pub yolo_detections: Vec<DetectionResult>,
+    /// Full-frame preview (downscaled), not ROI-only.
     pub preview_buffer: Option<CpuBuffer>,
+    pub capture_size: Size2D,
+    pub preview_scale: f32,
+    pub capture_roi: CaptureRoi,
+    pub model_input: Size2D,
     pub logical_zero_copy: bool,
 }
 
 impl PipelineReport {
     #[must_use]
     pub fn hsv_hit_count(&self) -> usize {
-        self.hsv.hit_count
+        if !self.hsv.objects.is_empty() {
+            self.hsv.objects.len()
+        } else if self.hsv.hit_count > 0 {
+            self.hsv.hit_count
+        } else {
+            0
+        }
     }
 
     #[must_use]
@@ -48,7 +63,10 @@ pub struct FramePipelineSettings {
     pub hsv: HsvSettings,
     pub inference: InferenceSettings,
     pub yolo_enabled: bool,
+    /// Feature toggle: preview is allowed when the operator enables it.
     pub preview_enabled: bool,
+    /// Per-frame gate: actually produce a full-frame preview buffer this tick.
+    pub want_preview_buffer: bool,
     pub capture_roi_max: Size2D,
     pub model_input: ModelInputSize,
 }
@@ -60,6 +78,8 @@ impl From<&RuntimeBindings> for FramePipelineSettings {
             inference: bindings.inference.clone(),
             yolo_enabled: bindings.yolo_enabled,
             preview_enabled: bindings.preview_enabled,
+            // Default: produce preview whenever the feature is on; app may override to throttle.
+            want_preview_buffer: bindings.preview_enabled,
             capture_roi_max: DEFAULT_CAPTURE_ROI,
             model_input: bindings.model_input,
         }
@@ -91,11 +111,16 @@ impl FramePipeline {
         inference: Option<&mut dyn InferenceBackend>,
     ) -> Result<PipelineReport, PipelineError> {
         let frame_size = frame.size();
+        let empty_roi = CaptureRoi::centered(frame_size, 0, 0);
         if frame_size.width == 0 || frame_size.height == 0 {
             return Ok(PipelineReport {
                 hsv: HsvMaskStats::default(),
                 yolo_detections: Vec::new(),
                 preview_buffer: None,
+                capture_size: frame_size,
+                preview_scale: 1.0,
+                capture_roi: empty_roi,
+                model_input: settings.model_input.size,
                 logical_zero_copy: frame.is_gpu(),
             });
         }
@@ -115,27 +140,40 @@ impl FramePipeline {
                 )
             });
 
-        let needs_cpu =
-            settings.preview_enabled || settings.hsv.enabled || inference_ready;
-        let cpu_buffer = if needs_cpu {
+        // ROI CPU readback for HSV / YOLO preprocess.
+        let needs_roi_cpu = settings.hsv.enabled || inference_ready;
+        let roi_cpu = if needs_roi_cpu {
             Some(self.vision.to_cpu_buffer(&processed.source)?)
         } else {
             None
         };
 
-        // After any readback, zero-copy flag must be false.
-        let logical_zero_copy = processed.logical_zero_copy && cpu_buffer.is_none();
+        // Full-frame preview is independent of ROI analysis readback.
+        // `want_preview_buffer` lets the app throttle expensive readback (~20fps).
+        let (preview_buffer, preview_scale) =
+            if settings.preview_enabled && settings.want_preview_buffer {
+                let full = self.vision.to_cpu_buffer(frame)?;
+                let (scaled, scale) = self
+                    .vision
+                    .downscale_for_preview(&full, PREVIEW_MAX_LONG_EDGE)?;
+                (Some(scaled), scale)
+            } else {
+                (None, 1.0)
+            };
 
-        let hsv = if let Some(buffer) = cpu_buffer.as_ref() {
-            self.vision.detect_hsv_stats(buffer, &settings.hsv)?
+        let logical_zero_copy =
+            processed.logical_zero_copy && roi_cpu.is_none() && preview_buffer.is_none();
+
+        let hsv = if let Some(buffer) = roi_cpu.as_ref() {
+            self.vision
+                .detect_hsv_stats(buffer, &settings.hsv, frame_size)?
         } else {
             HsvMaskStats::default()
         };
 
         let yolo_detections = if inference_ready {
             if let Some(backend) = inference {
-                let tensor_input = if let Some(buffer) = cpu_buffer.as_ref() {
-                    // Reuse single readback: build TensorInputHandle from CPU buffer.
+                let tensor_input = if let Some(buffer) = roi_cpu.as_ref() {
                     let tensor = vision_gpu::cpu_preprocess_nchw(buffer, settings.model_input.size)?;
                     let mut source = processed.clone();
                     source.source = CaptureFrame::Cpu(buffer.clone());
@@ -161,12 +199,88 @@ impl FramePipeline {
         Ok(PipelineReport {
             hsv,
             yolo_detections,
-            preview_buffer: if settings.preview_enabled {
-                cpu_buffer
-            } else {
-                None
-            },
+            preview_buffer,
+            capture_size: frame_size,
+            preview_scale,
+            capture_roi,
+            model_input: settings.model_input.size,
             logical_zero_copy,
+        })
+    }
+
+    /// CPU-only HSV/YOLO path. ROI buffer must already be produced on the capture thread.
+    /// Never touches D3D11 — safe to call from the vision worker.
+    pub fn process_analysis_roi(
+        &self,
+        analysis: &AnalysisFrame,
+        settings: &FramePipelineSettings,
+        inference: Option<&mut dyn InferenceBackend>,
+    ) -> Result<PipelineReport, PipelineError> {
+        let frame_size = analysis.capture_size;
+        if frame_size.width == 0 || frame_size.height == 0 {
+            return Ok(PipelineReport {
+                hsv: HsvMaskStats::default(),
+                yolo_detections: Vec::new(),
+                preview_buffer: None,
+                capture_size: frame_size,
+                preview_scale: 1.0,
+                capture_roi: analysis.capture_roi,
+                model_input: settings.model_input.size,
+                logical_zero_copy: false,
+            });
+        }
+
+        let inference_ready = settings.yolo_enabled
+            && inference.as_ref().is_some_and(|backend| {
+                !matches!(
+                    backend.provider_state(),
+                    ProviderState::Uninitialized | ProviderState::Failed(_)
+                )
+            });
+
+        let needs_roi_cpu = settings.hsv.enabled || inference_ready;
+        let hsv = if needs_roi_cpu && settings.hsv.enabled {
+            self.vision.detect_hsv_stats(
+                &analysis.roi_buffer,
+                &settings.hsv,
+                analysis.capture_size,
+            )?
+        } else {
+            HsvMaskStats::default()
+        };
+
+        let yolo_detections = if inference_ready {
+            if let Some(backend) = inference {
+                let tensor =
+                    vision_gpu::cpu_preprocess_nchw(&analysis.roi_buffer, settings.model_input.size)?;
+                let source = ProcessedFrame {
+                    source: CaptureFrame::Cpu(analysis.roi_buffer.clone()),
+                    roi: analysis.capture_roi.into(),
+                    logical_zero_copy: false,
+                };
+                let tensor_input = TensorInputHandle {
+                    source,
+                    target_size: settings.model_input.size,
+                    normalized: true,
+                    cpu_nchw: Some(tensor),
+                };
+                backend.infer(&tensor_input)?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        Ok(PipelineReport {
+            hsv,
+            yolo_detections,
+            preview_buffer: None,
+            capture_size: frame_size,
+            preview_scale: 1.0,
+            capture_roi: analysis.capture_roi,
+            model_input: settings.model_input.size,
+            logical_zero_copy: false,
         })
     }
 }
@@ -206,6 +320,8 @@ mod tests {
         assert!(report.hsv_hit_count() >= 1);
         assert_eq!(report.yolo_detection_count(), 0);
         assert!(report.preview_buffer.is_some());
+        assert_eq!(report.capture_size, Size2D::new(640, 640));
+        assert!((report.preview_scale - 1.0).abs() < f32::EPSILON);
         assert!(!report.logical_zero_copy);
     }
 
@@ -233,10 +349,39 @@ mod tests {
             },
             yolo_enabled: false,
             preview_enabled: false,
+            want_preview_buffer: false,
             capture_roi_max: DEFAULT_CAPTURE_ROI,
             model_input: ModelInputSize::new(640, 640),
         };
         assert_eq!(settings.capture_roi_max, Size2D::new(320, 320));
         assert_eq!(settings.model_input.size, Size2D::new(640, 640));
+    }
+
+    #[test]
+    fn want_preview_buffer_false_skips_full_frame_readback() {
+        let mut config = AppConfig::default();
+        config.vision_algorithms.hsv_tracking.enabled = true;
+        config.vision_algorithms.hsv_tracking.lower_bound = [0, 200, 200];
+        config.vision_algorithms.hsv_tracking.upper_bound = [10, 255, 255];
+        config.vision_algorithms.hsv_tracking.min_contour_area = 1;
+        config.vision_algorithms.yolo26_detection.enabled = false;
+
+        let bindings = RuntimeBindings::from_config(&config, true);
+        let mut settings = FramePipelineSettings::from(&bindings);
+        settings.want_preview_buffer = false;
+
+        let mut frame = CpuBuffer::empty(Size2D::new(640, 640), PixelFormat::Bgra8Unorm);
+        let offset = 320usize * frame.stride as usize + 320usize * 4;
+        frame.data[offset] = 0;
+        frame.data[offset + 1] = 0;
+        frame.data[offset + 2] = 255;
+        frame.data[offset + 3] = 255;
+
+        let report = FramePipeline::new()
+            .process(&CaptureFrame::Cpu(frame), &settings, None)
+            .expect("pipeline should succeed");
+
+        assert!(report.hsv_hit_count() >= 1);
+        assert!(report.preview_buffer.is_none());
     }
 }
