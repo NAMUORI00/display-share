@@ -5,11 +5,12 @@ Rust workspace for the Windows-first SmartScreenCapture app.
 Current scope:
 
 - Zero-copy oriented capture contracts
-- Windows capture backend using `windows-capture` (WGC / DXGI)
+- Windows capture backend using DXGI Desktop Duplication
 - Multi-vendor ONNX inference via `ort`: **DirectML → OpenVINO → CPU** (config `execution_providers`)
 - Intel Gram (Arc iGPU / NPU) via OpenVINO; NVIDIA/AMD/Intel via DirectML; CPU fallback
 - `eframe/egui` desktop shell
 - JSON config under `config/config.json` and class labels under `models/`
+- Optional own-window capture exclusion is off by default and logged when enabled
 
 ## Inference providers
 

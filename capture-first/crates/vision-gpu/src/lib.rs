@@ -91,7 +91,9 @@ impl GpuVisionPipeline {
             return Ok(HsvTuneResult::default());
         }
         ensure_canonical_format(buffer.pixel_format)?;
-        Ok(hsv_detect::detect_hsv_with_preview(buffer, settings, frame_size))
+        Ok(hsv_detect::detect_hsv_with_preview(
+            buffer, settings, frame_size,
+        ))
     }
 
     pub fn crop_capture_roi(

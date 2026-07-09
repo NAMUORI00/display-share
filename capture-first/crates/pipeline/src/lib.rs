@@ -168,7 +168,10 @@ impl FramePipeline {
 
         let hsv_tune = if let Some(buffer) = roi_cpu.as_ref() {
             if settings.hsv.enabled {
-                Some(self.vision.detect_hsv_tune(buffer, &settings.hsv, frame_size)?)
+                Some(
+                    self.vision
+                        .detect_hsv_tune(buffer, &settings.hsv, frame_size)?,
+                )
             } else {
                 None
             }
@@ -183,7 +186,8 @@ impl FramePipeline {
         let yolo_detections = if inference_ready {
             if let Some(backend) = inference {
                 let tensor_input = if let Some(buffer) = roi_cpu.as_ref() {
-                    let tensor = vision_gpu::cpu_preprocess_nchw(buffer, settings.model_input.size)?;
+                    let tensor =
+                        vision_gpu::cpu_preprocess_nchw(buffer, settings.model_input.size)?;
                     let mut source = processed.clone();
                     source.source = CaptureFrame::Cpu(buffer.clone());
                     source.logical_zero_copy = false;
@@ -266,8 +270,10 @@ impl FramePipeline {
 
         let yolo_detections = if inference_ready {
             if let Some(backend) = inference {
-                let tensor =
-                    vision_gpu::cpu_preprocess_nchw(&analysis.roi_buffer, settings.model_input.size)?;
+                let tensor = vision_gpu::cpu_preprocess_nchw(
+                    &analysis.roi_buffer,
+                    settings.model_input.size,
+                )?;
                 let source = ProcessedFrame {
                     source: CaptureFrame::Cpu(analysis.roi_buffer.clone()),
                     roi: analysis.capture_roi.into(),

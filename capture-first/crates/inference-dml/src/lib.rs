@@ -5,8 +5,8 @@ use std::fs;
 
 use capture_core::{
     CpuNchwTensor, DetectionResult, InferenceBackend, InferenceDiagnostics, InferenceError,
-    InferenceIoDescriptor, InferenceModelMetadata, InferenceSettings, ProviderState, RectI,
-    Size2D, TensorInputHandle, default_execution_providers,
+    InferenceIoDescriptor, InferenceModelMetadata, InferenceSettings, ProviderState, RectI, Size2D,
+    TensorInputHandle, default_execution_providers,
 };
 use ort::ep;
 use ort::ep::ExecutionProviderDispatch;
@@ -99,10 +99,7 @@ impl DirectMlInferenceBackend {
         );
     }
 
-    fn run_nchw(
-        &mut self,
-        tensor: &CpuNchwTensor,
-    ) -> Result<Vec<DetectionResult>, InferenceError> {
+    fn run_nchw(&mut self, tensor: &CpuNchwTensor) -> Result<Vec<DetectionResult>, InferenceError> {
         let settings = self.settings.clone().ok_or_else(|| {
             let error = InferenceError::NotInitialized;
             self.set_last_error_message(error.to_string());
@@ -215,7 +212,8 @@ impl InferenceBackend for DirectMlInferenceBackend {
         self.load_class_names(&settings)?;
 
         let providers = normalize_execution_providers(&settings.execution_providers);
-        let openvino_devices = resolve_openvino_device_types(settings.openvino_device_type.as_deref());
+        let openvino_devices =
+            resolve_openvino_device_types(settings.openvino_device_type.as_deref());
         let mut attempt_log = Vec::new();
 
         for kind in &providers {
@@ -262,8 +260,7 @@ impl InferenceBackend for DirectMlInferenceBackend {
                             }
                             Err(err) => {
                                 warn!("OpenVINO ({device_type}) session failed: {err}");
-                                attempt_log
-                                    .push(format!("openvino/{device_type}: {err}"));
+                                attempt_log.push(format!("openvino/{device_type}: {err}"));
                             }
                         }
                     }
@@ -326,10 +323,7 @@ impl InferenceBackend for DirectMlInferenceBackend {
 #[must_use]
 pub fn normalize_execution_providers(raw: &[String]) -> Vec<ProviderKind> {
     let defaults = default_execution_providers();
-    let use_defaults = raw.is_empty()
-        || raw
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case("auto"));
+    let use_defaults = raw.is_empty() || raw.iter().any(|name| name.eq_ignore_ascii_case("auto"));
     let expanded: Vec<&str> = if use_defaults {
         defaults.iter().map(String::as_str).collect()
     } else {
@@ -348,10 +342,10 @@ pub fn normalize_execution_providers(raw: &[String]) -> Vec<ProviderKind> {
                 None
             }
         };
-        if let Some(kind) = kind {
-            if !out.contains(&kind) {
-                out.push(kind);
-            }
+        if let Some(kind) = kind
+            && !out.contains(&kind)
+        {
+            out.push(kind);
         }
     }
     out
@@ -422,26 +416,26 @@ fn build_validation_notes(
         ));
     }
 
-    if let Some(input) = inputs.first() {
-        if let Some(shape) = input.tensor_shape.as_ref() {
-            if shape.len() != 4 {
+    if let Some(input) = inputs.first()
+        && let Some(shape) = input.tensor_shape.as_ref()
+    {
+        if shape.len() != 4 {
+            notes.push(format!(
+                "input `{}` reports rank {}; preprocessing assumes rank 4 NCHW/NHWC-compatible input",
+                input.name,
+                shape.len()
+            ));
+        } else if let Some(expected) = expected_input_size {
+            let height = shape[2];
+            let width = shape[3];
+            if height > 0
+                && width > 0
+                && (height as u32 != expected.height || width as u32 != expected.width)
+            {
                 notes.push(format!(
-                    "input `{}` reports rank {}; preprocessing assumes rank 4 NCHW/NHWC-compatible input",
-                    input.name,
-                    shape.len()
+                    "input `{}` expects {width}x{height}; configured preprocessing targets {}x{}",
+                    input.name, expected.width, expected.height
                 ));
-            } else if let Some(expected) = expected_input_size {
-                let height = shape[2];
-                let width = shape[3];
-                if height > 0
-                    && width > 0
-                    && (height as u32 != expected.height || width as u32 != expected.width)
-                {
-                    notes.push(format!(
-                        "input `{}` expects {width}x{height}; configured preprocessing targets {}x{}",
-                        input.name, expected.width, expected.height
-                    ));
-                }
             }
         }
     }
@@ -519,20 +513,20 @@ fn parse_detections(
         return Ok(Vec::new());
     }
 
-    if let Some(last) = shape.last().copied() {
-        if last >= 6 {
-            return Ok(limit_results(
-                parse_row_major(
-                    shape,
-                    data,
-                    class_names,
-                    width,
-                    height,
-                    confidence_threshold,
-                ),
-                max_detections,
-            ));
-        }
+    if let Some(last) = shape.last().copied()
+        && last >= 6
+    {
+        return Ok(limit_results(
+            parse_row_major(
+                shape,
+                data,
+                class_names,
+                width,
+                height,
+                confidence_threshold,
+            ),
+            max_detections,
+        ));
     }
 
     if shape.len() == 3 && shape[1] >= 6 {
@@ -682,8 +676,8 @@ fn limit_results(mut results: Vec<DetectionResult>, max_detections: usize) -> Ve
 #[cfg(test)]
 mod tests {
     use super::{
-        ProviderKind, build_validation_notes, is_supported_output_shape, normalize_execution_providers,
-        parse_detections, resolve_openvino_device_types,
+        ProviderKind, build_validation_notes, is_supported_output_shape,
+        normalize_execution_providers, parse_detections, resolve_openvino_device_types,
     };
     use capture_core::{InferenceIoDescriptor, Size2D};
 

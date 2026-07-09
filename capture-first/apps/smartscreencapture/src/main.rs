@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use capture_core::{
-    AnalysisFrame, CaptureBackend, CaptureBackendPreference, CaptureSession, CaptureRoi,
-    CpuBuffer, DetectionResult, HsvMaskStats, HsvSettings, HsvTuneResult, InferenceBackend,
+    AnalysisFrame, CaptureBackend, CaptureBackendPreference, CaptureRoi, CaptureSession, CpuBuffer,
+    DetectionResult, HsvMaskStats, HsvSettings, HsvTuneResult, InferenceBackend,
     InferenceDiagnostics, InferenceSettings, PixelFormat, ProviderState, Size2D,
 };
 use capture_windows::WindowsCaptureBackend;
@@ -30,11 +30,11 @@ const CAPTURE_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
 const HSV_TUNE_INTERVAL: Duration = Duration::from_millis(100);
 
 fn main() -> Result<()> {
-    // Quiet by default (share-session tone); override with RUST_LOG.
+    // Keep diagnostics visible by default; override with RUST_LOG when needed.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("error")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
@@ -47,13 +47,7 @@ fn main() -> Result<()> {
     };
 
     let app = DesktopApp::bootstrap()?;
-    let window_title = app
-        .ui
-        .model
-        .config
-        .concealment
-        .window_title()
-        .to_owned();
+    let window_title = app.ui.model.config.privacy.window_title().to_owned();
     eframe::run_native(
         &window_title,
         options,
@@ -62,8 +56,19 @@ fn main() -> Result<()> {
     .map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 
-/// Exclude this process's top-level windows from desktop capture composition.
-fn exclude_our_windows_from_capture() {
+struct WindowExclusionResult {
+    applied: usize,
+    failed: usize,
+}
+
+struct WindowExclusionState {
+    pid: u32,
+    applied: usize,
+    failed: usize,
+}
+
+/// Optional recursion guard for local previews. This is disabled by default and logged when used.
+fn exclude_own_windows_from_capture() -> WindowExclusionResult {
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -72,19 +77,32 @@ fn exclude_our_windows_from_capture() {
     use windows::core::BOOL;
 
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let our_pid = lparam.0 as u32;
+        let state = unsafe { &mut *(lparam.0 as *mut WindowExclusionState) };
         let mut pid = 0u32;
         unsafe {
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            if pid == our_pid {
-                let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            if pid == state.pid {
+                if SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok() {
+                    state.applied += 1;
+                } else {
+                    state.failed += 1;
+                }
             }
         }
         BOOL(1)
     }
 
-    let pid = unsafe { GetCurrentProcessId() };
-    let _ = unsafe { EnumWindows(Some(enum_proc), LPARAM(pid as isize)) };
+    let mut state = WindowExclusionState {
+        pid: unsafe { GetCurrentProcessId() },
+        applied: 0,
+        failed: 0,
+    };
+    let ptr = &mut state as *mut WindowExclusionState;
+    let _ = unsafe { EnumWindows(Some(enum_proc), LPARAM(ptr as isize)) };
+    WindowExclusionResult {
+        applied: state.applied,
+        failed: state.failed,
+    }
 }
 
 enum WorkerCommand {
@@ -96,6 +114,7 @@ enum WorkerCommand {
     Shutdown,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum WorkerEvent {
     Frame {
         hsv: HsvMaskStats,
@@ -106,11 +125,11 @@ enum WorkerEvent {
         model_input: Size2D,
         processing_ms: f64,
         provider_state: ProviderState,
-        diagnostics: InferenceDiagnostics,
+        diagnostics: Box<InferenceDiagnostics>,
     },
     ModelReady {
         state: ProviderState,
-        diagnostics: InferenceDiagnostics,
+        diagnostics: Box<InferenceDiagnostics>,
         summary: String,
     },
     Failed(String),
@@ -126,7 +145,6 @@ impl VisionWorker {
     fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = bounded::<WorkerCommand>(2);
         let (event_tx, event_rx) = bounded::<WorkerEvent>(4);
-        // Unnamed thread — avoid capture-branded names in process tools.
         let handle = thread::spawn(move || vision_worker_loop(cmd_rx, event_tx));
         Self {
             cmd_tx,
@@ -185,7 +203,7 @@ fn vision_worker_loop(cmd_rx: Receiver<WorkerCommand>, event_tx: Sender<WorkerEv
                     let summary = inference_summary(&diagnostics);
                     let _ = event_tx.send(WorkerEvent::ModelReady {
                         state,
-                        diagnostics,
+                        diagnostics: Box::new(diagnostics),
                         summary,
                     });
                 }
@@ -214,7 +232,7 @@ fn vision_worker_loop(cmd_rx: Receiver<WorkerCommand>, event_tx: Sender<WorkerEv
                             model_input: report.model_input,
                             processing_ms,
                             provider_state: inference.provider_state(),
-                            diagnostics: inference.diagnostics(),
+                            diagnostics: Box::new(inference.diagnostics()),
                         });
                     }
                     Err(err) => {
@@ -324,7 +342,7 @@ impl DesktopApp {
                         self.ui.model.selected_target = 0;
                     }
                     self.ui.model.last_error = None;
-                    self.push_log_quiet("targets refreshed", "targets refreshed");
+                    self.push_log("targets refreshed");
                 }
                 Err(err) => self.ui.model.last_error = Some(err.to_string()),
             },
@@ -340,10 +358,7 @@ impl DesktopApp {
                     .yolo26_detection
                     .execution_providers
                     .join(", ");
-                self.push_log_quiet(
-                    "vision enabled",
-                    format!("loading model with EP order: [{providers}]"),
-                );
+                self.push_log(format!("loading model with EP order: [{providers}]"));
                 self.worker.load_model(settings);
             }
             UiCommand::SaveSettings => {
@@ -352,7 +367,7 @@ impl DesktopApp {
                 match config_to_save.save(&self.config_path) {
                     Ok(()) => {
                         self.ui.model.last_error = None;
-                        self.push_log_quiet("settings saved", "settings saved");
+                        self.push_log("settings saved");
                     }
                     Err(err) => {
                         self.ui.model.last_error = Some(err.to_string());
@@ -367,7 +382,7 @@ impl DesktopApp {
                         picker.apply_to(&mut self.ui.model.config.vision_algorithms.hsv_tracking);
                         self.ui.mark_hsv_tune_dirty();
                         self.ui.model.last_error = None;
-                        self.push_log_quiet("settings loaded", "HSV settings loaded");
+                        self.push_log("HSV settings loaded");
                     }
                     Err(err) => self.ui.model.last_error = Some(err.to_string()),
                 }
@@ -381,7 +396,7 @@ impl DesktopApp {
                 match save_hsv_picker_settings(&path, &picker) {
                     Ok(()) => {
                         self.ui.model.last_error = None;
-                        self.push_log_quiet("settings saved", "HSV settings saved");
+                        self.push_log("HSV settings saved");
                     }
                     Err(err) => self.ui.model.last_error = Some(err.to_string()),
                 }
@@ -422,16 +437,17 @@ impl DesktopApp {
                 self.session_fingerprint = self.current_fingerprint();
                 self.last_preview_enabled = false;
                 self.last_analysis_enabled = false;
-                if self.ui.model.config.concealment.exclude_windows_active() {
-                    exclude_our_windows_from_capture();
+                if self.ui.model.config.privacy.exclude_own_windows_active() {
+                    let result = exclude_own_windows_from_capture();
+                    self.push_log(format!(
+                        "privacy: excluded {} own window(s) from local capture preview; {} failure(s)",
+                        result.applied, result.failed
+                    ));
                 }
-                self.push_log_quiet(
-                    "sharing started",
-                    format!(
-                        "sharing started on {} @ {} FPS",
-                        target.name, self.ui.model.config.performance.target_fps
-                    ),
-                );
+                self.push_log(format!(
+                    "sharing started on {} @ {} FPS",
+                    target.name, self.ui.model.config.performance.target_fps
+                ));
             }
             Err(err) => self.ui.model.last_error = Some(err.to_string()),
         }
@@ -453,11 +469,10 @@ impl DesktopApp {
         self.last_preview_enabled = false;
         self.last_analysis_enabled = false;
         self.ui.model.preview_frame = None;
-        self.ui.model.preview_frame_version =
-            self.ui.model.preview_frame_version.wrapping_add(1);
+        self.ui.model.preview_frame_version = self.ui.model.preview_frame_version.wrapping_add(1);
         self.last_analysis = None;
         self.clear_hsv_tune_previews();
-        self.push_log_quiet("sharing stopped", "sharing stopped");
+        self.push_log("sharing stopped");
     }
 
     fn maybe_restart_capture_for_option_changes(&mut self) {
@@ -473,14 +488,20 @@ impl DesktopApp {
         if current == *previous {
             return;
         }
-        self.push_log_quiet("session restarting…", "session options changed — restarting…");
+        self.push_log("session options changed — restarting…");
         self.stop_capture();
         self.start_capture();
     }
 
     fn sync_session_gates(&mut self) {
         let want_preview = self.ui.monitor_is_open() && self.ui.model.preview_enabled;
-        let yolo_on = self.ui.model.config.vision_algorithms.yolo26_detection.enabled;
+        let yolo_on = self
+            .ui
+            .model
+            .config
+            .vision_algorithms
+            .yolo26_detection
+            .enabled;
         let hsv_on = self.ui.model.config.vision_algorithms.hsv_tracking.enabled;
         let want_analysis = hsv_on || yolo_on;
 
@@ -536,7 +557,7 @@ impl DesktopApp {
         }
         self.yolo_autoload_done = true;
         let settings = (&self.ui.model.config.vision_algorithms.yolo26_detection).into();
-        self.push_log_quiet("vision enabled", "vision enabled — loading model…");
+        self.push_log("vision enabled — loading model…");
         self.worker.load_model(settings);
     }
 
@@ -671,11 +692,8 @@ impl DesktopApp {
             return;
         }
 
-        let tune = detect_hsv_with_preview(
-            &analysis.roi_buffer,
-            &hsv_settings,
-            analysis.capture_size,
-        );
+        let tune =
+            detect_hsv_with_preview(&analysis.roi_buffer, &hsv_settings, analysis.capture_size);
         apply_hsv_tune_to_model(&mut self.ui.model, &tune, &analysis.roi_buffer);
         self.hsv_tune_dirty = false;
         self.last_hsv_tune_at = now;
@@ -720,11 +738,8 @@ impl DesktopApp {
                     } else {
                         self.ui.model.hsv = HsvMaskStats::default();
                     }
-                    self.ui.model.yolo_detections = if yolo_on {
-                        yolo_detections
-                    } else {
-                        Vec::new()
-                    };
+                    self.ui.model.yolo_detections =
+                        if yolo_on { yolo_detections } else { Vec::new() };
                     // Avoid stale full-frame ROI metadata when no vision path is active.
                     if !hsv_on && !yolo_on {
                         self.ui.model.capture_roi = None;
@@ -733,7 +748,7 @@ impl DesktopApp {
                     self.ui.model.capture_frame_size = Some(capture_size);
                     self.ui.model.model_input_size = Some(model_input);
                     self.ui.model.provider_state = provider_state;
-                    self.ui.model.inference_diagnostics = diagnostics;
+                    self.ui.model.inference_diagnostics = *diagnostics;
                     self.telemetry.set_processing_ms(processing_ms);
                 }
                 WorkerEvent::ModelReady {
@@ -741,28 +756,30 @@ impl DesktopApp {
                     diagnostics,
                     summary,
                 } => {
+                    let diagnostics = *diagnostics;
                     self.ui.model.provider_state = state;
                     self.ui.model.inference_diagnostics = diagnostics.clone();
                     self.ui.model.last_error = None;
-                    self.push_log_quiet(
-                        "vision ready",
-                        format!(
-                            "inference backend initialized: {}",
-                            provider_label_short(&self.ui.model.provider_state)
-                        ),
-                    );
-                    if !self.ui.model.config.concealment.quiet_logs_active() {
-                        self.push_log(summary);
-                        if let Some(reason) = diagnostics.fallback_reason {
-                            self.push_log(format!("provider fallback reason: {reason}"));
-                        }
-                        for note in diagnostics.validation_notes {
-                            self.push_log(format!("model validation: {note}"));
-                        }
+                    self.push_log(format!(
+                        "inference backend initialized: {}",
+                        provider_label_short(&self.ui.model.provider_state)
+                    ));
+                    self.push_log(summary);
+                    if let Some(reason) = diagnostics.fallback_reason {
+                        self.push_log(format!("provider fallback reason: {reason}"));
+                    }
+                    for note in diagnostics.validation_notes {
+                        self.push_log(format!("model validation: {note}"));
                     }
                 }
                 WorkerEvent::Failed(message) => {
-                    if self.ui.model.config.vision_algorithms.yolo26_detection.enabled
+                    if self
+                        .ui
+                        .model
+                        .config
+                        .vision_algorithms
+                        .yolo26_detection
+                        .enabled
                         && matches!(
                             self.ui.model.provider_state,
                             ProviderState::Uninitialized | ProviderState::Failed(_)
@@ -771,7 +788,7 @@ impl DesktopApp {
                         self.yolo_autoload_done = false;
                     }
                     self.ui.model.last_error = Some(message.clone());
-                    self.push_log_quiet("session error", format!("frame processing failed: {message}"));
+                    self.push_log(format!("frame processing failed: {message}"));
                 }
             }
         }
@@ -781,15 +798,6 @@ impl DesktopApp {
         self.ui.model.logs.push(line.into());
         if self.ui.model.logs.len() > 200 {
             self.ui.model.logs.remove(0);
-        }
-    }
-
-    /// When quiet logs are on, show `quiet`; otherwise show `verbose`.
-    fn push_log_quiet(&mut self, quiet: impl Into<String>, verbose: impl Into<String>) {
-        if self.ui.model.config.concealment.quiet_logs_active() {
-            self.push_log(quiet);
-        } else {
-            self.push_log(verbose);
         }
     }
 }
@@ -811,11 +819,15 @@ impl eframe::App for DesktopApp {
         self.sync_session_gates();
         let monitor_open = self.ui.monitor_is_open();
         // Apply window exclusion only when needed (not every frame).
-        if self.ui.model.config.concealment.exclude_windows_active()
+        if self.ui.model.config.privacy.exclude_own_windows_active()
             && monitor_open
             && !monitor_was_open
         {
-            exclude_our_windows_from_capture();
+            let result = exclude_own_windows_from_capture();
+            self.push_log(format!(
+                "privacy: refreshed own-window capture exclusion for preview; {} applied, {} failed",
+                result.applied, result.failed
+            ));
         }
         self.last_monitor_open = monitor_open;
         if self.ui.model.capture_running || self.ui.needs_hsv_tune_refresh() {
@@ -973,7 +985,9 @@ fn overlay_from_source_and_mask(
 }
 
 fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
-    ((a as f32) * (1.0 - t) + (b as f32) * t).round().clamp(0.0, 255.0) as u8
+    ((a as f32) * (1.0 - t) + (b as f32) * t)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 fn provider_label_short(state: &ProviderState) -> String {

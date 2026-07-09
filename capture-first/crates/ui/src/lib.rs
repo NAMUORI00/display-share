@@ -224,8 +224,7 @@ impl SmartCaptureUi {
 
     pub fn needs_hsv_tune_refresh(&self) -> bool {
         self.model.config.vision_algorithms.hsv_tracking.enabled
-            && (self.hsv_window_open
-                || (self.monitor_open && self.model.hsv_mask_overlay_enabled))
+            && (self.hsv_window_open || (self.monitor_open && self.model.hsv_mask_overlay_enabled))
     }
 
     fn sync_hsv_enable_edge(&mut self) {
@@ -268,8 +267,7 @@ impl SmartCaptureUi {
         }
         let hsv_on = self.model.config.vision_algorithms.hsv_tracking.enabled;
         if hsv_on
-            && (self.hsv_window_open
-                || (self.monitor_open && self.model.hsv_mask_overlay_enabled))
+            && (self.hsv_window_open || (self.monitor_open && self.model.hsv_mask_overlay_enabled))
         {
             self.sync_hsv_tune_textures(ctx);
         }
@@ -318,7 +316,7 @@ impl SmartCaptureUi {
     fn show_monitor_viewport(&mut self, ctx: &egui::Context) {
         let mut close_requested = false;
 
-        let monitor_title = self.model.config.concealment.monitor_title().to_owned();
+        let monitor_title = self.model.config.privacy.monitor_title().to_owned();
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("vp_preview"),
             egui::ViewportBuilder::default()
@@ -338,11 +336,7 @@ impl SmartCaptureUi {
                         });
                 } else {
                     egui::CentralPanel::default()
-                        .frame(
-                            Frame::new()
-                                .fill(PAPER)
-                                .inner_margin(Margin::same(12)),
-                        )
+                        .frame(Frame::new().fill(PAPER).inner_margin(Margin::same(12)))
                         .show(ctx, |ui| {
                             self.draw_preview_stage(ui);
                         });
@@ -482,12 +476,7 @@ impl SmartCaptureUi {
             );
             columns[1].vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Mask")
-                            .strong()
-                            .size(13.0)
-                            .color(PICKER_INK),
-                    );
+                    ui.label(RichText::new("Mask").strong().size(13.0).color(PICKER_INK));
                     ui.selectable_value(
                         &mut self.model.hsv_preview_mask_mode,
                         HsvPreviewMaskMode::RawMask,
@@ -527,12 +516,7 @@ impl SmartCaptureUi {
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Display")
-                            .small()
-                            .strong()
-                            .color(TEXT_MUTED),
-                    );
+                    ui.label(RichText::new("Display").small().strong().color(TEXT_MUTED));
                     ui.add_space(4.0);
 
                     let selected_label = self
@@ -552,7 +536,7 @@ impl SmartCaptureUi {
 
                     egui::ComboBox::from_id_salt("display_pick")
                         .selected_text(selected_label)
-                        .width(ui.available_width().min(240.0).max(160.0))
+                        .width(ui.available_width().clamp(160.0, 240.0))
                         .show_ui(ui, |ui| {
                             if self.model.targets.is_empty() {
                                 ui.label(RichText::new("Refresh targets").color(TEXT_MUTED));
@@ -630,7 +614,11 @@ impl SmartCaptureUi {
         };
         ui.label(RichText::new(status).small().color(TEXT_MUTED));
 
-        if let Some(size) = self.model.capture_frame_size.filter(|_| self.model.capture_running) {
+        if let Some(size) = self
+            .model
+            .capture_frame_size
+            .filter(|_| self.model.capture_running)
+        {
             ui.label(
                 RichText::new(format!("{}×{}", size.width, size.height))
                     .small()
@@ -708,7 +696,7 @@ impl SmartCaptureUi {
         // Row 1: title | primary Start/Stop (never share a line with status chip)
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(self.model.config.concealment.display_name())
+                RichText::new(self.model.config.privacy.display_name())
                     .strong()
                     .size(15.0)
                     .color(TEXT_PRIMARY),
@@ -742,7 +730,11 @@ impl SmartCaptureUi {
 
         // Row 2: status chip | secondary actions
         ui.horizontal(|ui| {
-            status_chip(ui, self.model.capture_running, self.model.last_error.is_some());
+            status_chip(
+                ui,
+                self.model.capture_running,
+                self.model.last_error.is_some(),
+            );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.menu_button(RichText::new("···").strong(), |ui| {
                     if ui.button("Save settings").clicked() {
@@ -866,7 +858,16 @@ impl SmartCaptureUi {
         // Snapshot mids for spectrum painting (avoid simultaneous mut borrows).
         let hue_mid = h_min.saturating_add(h_max) / 2;
         let sat_mid = s_min.saturating_add(s_max) / 2;
-        changed |= hsv_channel_row(ui, "Hue", &mut h_min, &mut h_max, 179, ChannelKind::Hue, 0, 255);
+        changed |= hsv_channel_row(
+            ui,
+            "Hue",
+            &mut h_min,
+            &mut h_max,
+            179,
+            ChannelKind::Hue,
+            0,
+            255,
+        );
         changed |= hsv_channel_row(
             ui,
             "Sat",
@@ -910,29 +911,24 @@ impl SmartCaptureUi {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new("Min area (px)")
-                                .small()
-                                .color(PICKER_MUTED),
-                        );
+                        ui.label(RichText::new("Min area (px)").small().color(PICKER_MUTED));
                         let r = ui.add(
                             egui::DragValue::new(&mut min_area)
                                 .range(1..=10_000)
                                 .speed(1.0),
                         );
                         if r.changed() {
-                            self.model.config.vision_algorithms.hsv_tracking.min_contour_area =
-                                min_area;
+                            self.model
+                                .config
+                                .vision_algorithms
+                                .hsv_tracking
+                                .min_contour_area = min_area;
                             self.mark_hsv_tune_dirty();
                         }
                     });
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new("Morph kernel")
-                                .small()
-                                .color(PICKER_MUTED),
-                        );
+                        ui.label(RichText::new("Morph kernel").small().color(PICKER_MUTED));
                         let r = ui.add(
                             egui::DragValue::new(&mut morph_kernel)
                                 .range(1..=15)
@@ -994,13 +990,12 @@ impl SmartCaptureUi {
                 (false, false) => "Preview".to_owned(),
             };
             ui.label(RichText::new(counts).small().color(TEXT_MUTED));
-            if hsv_on {
-                if ui
+            if hsv_on
+                && ui
                     .checkbox(&mut self.model.hsv_mask_overlay_enabled, "Mask")
                     .changed()
-                {
-                    self.mark_hsv_tune_dirty();
-                }
+            {
+                self.mark_hsv_tune_dirty();
             }
             if yolo_on
                 && matches!(
@@ -1008,11 +1003,7 @@ impl SmartCaptureUi {
                     ProviderState::Uninitialized | ProviderState::Failed(_)
                 )
             {
-                ui.label(
-                    RichText::new("Loading model…")
-                        .small()
-                        .color(TERRACOTTA),
-                );
+                ui.label(RichText::new("Loading model…").small().color(TERRACOTTA));
             }
         });
         ui.add_space(4.0);
@@ -1022,7 +1013,12 @@ impl SmartCaptureUi {
         let stage = response.rect;
 
         painter.rect_filled(stage, CornerRadius::same(8), SURFACE);
-        painter.rect_stroke(stage, CornerRadius::same(8), Stroke::new(1.0, BORDER), egui::StrokeKind::Outside);
+        painter.rect_stroke(
+            stage,
+            CornerRadius::same(8),
+            Stroke::new(1.0, BORDER),
+            egui::StrokeKind::Outside,
+        );
 
         let Some(texture) = self.preview_texture.as_ref() else {
             painter.text(
@@ -1131,15 +1127,16 @@ fn paint_overlays(
     let yolo_on = model.config.vision_algorithms.yolo26_detection.enabled;
 
     // Mask overlay only while HSV is enabled (flag alone is not enough).
-    if hsv_on && model.hsv_mask_overlay_enabled {
-        if let Some(mask_tex) = hsv_mask_texture {
-            painter.image(
-                mask_tex.id(),
-                image_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::from_rgba_premultiplied(0xE8, 0xB8, 0x6D, 110),
-            );
-        }
+    if hsv_on
+        && model.hsv_mask_overlay_enabled
+        && let Some(mask_tex) = hsv_mask_texture
+    {
+        painter.image(
+            mask_tex.id(),
+            image_rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::from_rgba_premultiplied(0xE8, 0xB8, 0x6D, 110),
+        );
     }
 
     // Never flood-fill ROI (full-frame analysis ROI was painting a green film over View).
@@ -1369,10 +1366,13 @@ fn draw_hsv_range_swatches(
         });
         ui.add_space(8.0);
         ui.vertical(|ui| {
-            ui.label(RichText::new("Blend across range").small().color(PICKER_MUTED));
+            ui.label(
+                RichText::new("Blend across range")
+                    .small()
+                    .color(PICKER_MUTED),
+            );
             let width = (ui.available_width() - 8.0).clamp(140.0, 220.0);
-            let (response, painter) =
-                ui.allocate_painter(Vec2::new(width, 40.0), Sense::hover());
+            let (response, painter) = ui.allocate_painter(Vec2::new(width, 40.0), Sense::hover());
             let rect = response.rect;
             let steps = 24usize;
             let step_w = rect.width() / steps as f32;
@@ -1384,7 +1384,10 @@ fn draw_hsv_range_swatches(
                 let c = opencv_hsv_to_color32(h, s, v);
                 let x = rect.min.x + i as f32 * step_w;
                 painter.rect_filled(
-                    Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(step_w + 0.5, rect.height())),
+                    Rect::from_min_size(
+                        Pos2::new(x, rect.min.y),
+                        Vec2::new(step_w + 0.5, rect.height()),
+                    ),
                     CornerRadius::ZERO,
                     c,
                 );
@@ -1463,7 +1466,10 @@ fn paint_channel_spectrum(
         };
         let x = rect.min.x + i as f32 * step_w;
         painter.rect_filled(
-            Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(step_w + 0.5, rect.height())),
+            Rect::from_min_size(
+                Pos2::new(x, rect.min.y),
+                Vec2::new(step_w + 0.5, rect.height()),
+            ),
             CornerRadius::ZERO,
             c,
         );
@@ -1477,6 +1483,7 @@ fn paint_channel_spectrum(
 }
 
 /// Spectrum track + Min/Max sliders + exact numeric fields.
+#[allow(clippy::too_many_arguments)]
 fn hsv_channel_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -1566,29 +1573,31 @@ fn draw_picker_tune_column(
             PICKER_MUTED,
         );
     }
-    if let (Some(hsv), Some(capture_size)) = (hsv_boxes, model.capture_frame_size) {
-        if capture_size.width > 0 && capture_size.height > 0 && !hsv.objects.is_empty() {
-            let sx = image_rect.width() / capture_size.width as f32;
-            let sy = image_rect.height() / capture_size.height as f32;
-            for obj in &hsv.objects {
-                let r = obj.rect;
-                let screen = Rect::from_min_max(
-                    Pos2::new(
-                        image_rect.min.x + r.x as f32 * sx,
-                        image_rect.min.y + r.y as f32 * sy,
-                    ),
-                    Pos2::new(
-                        image_rect.min.x + (r.x + r.width as i32) as f32 * sx,
-                        image_rect.min.y + (r.y + r.height as i32) as f32 * sy,
-                    ),
-                );
-                painter.rect_stroke(
-                    screen,
-                    CornerRadius::ZERO,
-                    Stroke::new(2.0, Color32::from_rgb(255, 200, 80)),
-                    egui::StrokeKind::Outside,
-                );
-            }
+    if let (Some(hsv), Some(capture_size)) = (hsv_boxes, model.capture_frame_size)
+        && capture_size.width > 0
+        && capture_size.height > 0
+        && !hsv.objects.is_empty()
+    {
+        let sx = image_rect.width() / capture_size.width as f32;
+        let sy = image_rect.height() / capture_size.height as f32;
+        for obj in &hsv.objects {
+            let r = obj.rect;
+            let screen = Rect::from_min_max(
+                Pos2::new(
+                    image_rect.min.x + r.x as f32 * sx,
+                    image_rect.min.y + r.y as f32 * sy,
+                ),
+                Pos2::new(
+                    image_rect.min.x + (r.x + r.width as i32) as f32 * sx,
+                    image_rect.min.y + (r.y + r.height as i32) as f32 * sy,
+                ),
+            );
+            painter.rect_stroke(
+                screen,
+                CornerRadius::ZERO,
+                Stroke::new(2.0, Color32::from_rgb(255, 200, 80)),
+                egui::StrokeKind::Outside,
+            );
         }
     }
     painter.rect_stroke(
@@ -1650,11 +1659,7 @@ fn status_chip(ui: &mut egui::Ui, sharing: bool, errored: bool) {
             Color32::from_rgb(0x3F, 0x6B, 0x4F),
         )
     } else {
-        (
-            "Idle",
-            Color32::from_rgb(0xF0, 0xE8, 0xD8),
-            INK_MUTED,
-        )
+        ("Idle", Color32::from_rgb(0xF0, 0xE8, 0xD8), INK_MUTED)
     };
     Frame::new()
         .fill(fill)
@@ -1688,9 +1693,6 @@ fn fit_inside(source: Vec2, available: Vec2) -> Vec2 {
     }
     let scale = (available.x / source.x)
         .min(available.y / source.y)
-        .min(1.0)
-        .max(0.0);
+        .clamp(0.0, 1.0);
     Vec2::new(source.x * scale, source.y * scale)
 }
-
-

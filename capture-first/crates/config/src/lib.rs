@@ -28,53 +28,26 @@ pub struct ProductionSystem {
 impl Default for ProductionSystem {
     fn default() -> Self {
         Self {
-            name: "Screen Share".to_owned(),
+            name: "SmartScreenCapture".to_owned(),
             version: "1.0.0".to_owned(),
-            purpose: "Desktop screen sharing".to_owned(),
+            purpose: "Local screen capture and vision analysis".to_owned(),
             mode: "production_mode".to_owned(),
         }
     }
 }
 
-/// Blend-in / low-fingerprint settings (screen-share class identity).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConcealmentConfig {
-    /// Master switch for identity, quiet logs, and window exclusion.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Prefer consumer screen-share naming and UI tone.
-    #[serde(default = "default_true")]
-    pub blend_in_screen_share: bool,
-    /// Exclude app windows from desktop capture composition (WDA_EXCLUDEFROMCAPTURE).
-    #[serde(default = "default_true")]
-    pub exclude_windows_from_capture: bool,
-    /// Quiet UI / tracing noise (share-session wording).
-    #[serde(default = "default_true")]
-    pub quiet_logs: bool,
+/// Operator-controlled privacy settings. These defaults favor visible, auditable behavior.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PrivacyConfig {
+    /// Optional recursion guard for local previews. Disabled by default and logged when enabled.
+    #[serde(default)]
+    pub exclude_own_windows_from_capture: bool,
     pub display_name: Option<String>,
     pub window_title: Option<String>,
     pub monitor_title: Option<String>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-impl Default for ConcealmentConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            blend_in_screen_share: true,
-            exclude_windows_from_capture: true,
-            quiet_logs: true,
-            display_name: None,
-            window_title: None,
-            monitor_title: None,
-        }
-    }
-}
-
-impl ConcealmentConfig {
+impl PrivacyConfig {
     #[must_use]
     pub fn display_name(&self) -> &str {
         self.display_name
@@ -100,13 +73,8 @@ impl ConcealmentConfig {
     }
 
     #[must_use]
-    pub fn quiet_logs_active(&self) -> bool {
-        self.enabled && self.quiet_logs
-    }
-
-    #[must_use]
-    pub fn exclude_windows_active(&self) -> bool {
-        self.enabled && self.exclude_windows_from_capture
+    pub fn exclude_own_windows_active(&self) -> bool {
+        self.exclude_own_windows_from_capture
     }
 }
 
@@ -305,7 +273,10 @@ pub fn load_hsv_picker_settings(path: &Path) -> Result<HsvPickerSettings, Config
     Ok(serde_json::from_str(&content).unwrap_or_default())
 }
 
-pub fn save_hsv_picker_settings(path: &Path, settings: &HsvPickerSettings) -> Result<(), ConfigError> {
+pub fn save_hsv_picker_settings(
+    path: &Path,
+    settings: &HsvPickerSettings,
+) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -385,7 +356,7 @@ impl Default for VisionAlgorithms {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub production_system: ProductionSystem,
     pub vision_algorithms: VisionAlgorithms,
@@ -395,21 +366,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub compatibility: CompatibilityConfig,
     #[serde(default)]
-    pub concealment: ConcealmentConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            production_system: ProductionSystem::default(),
-            vision_algorithms: VisionAlgorithms::default(),
-            analytics: AnalyticsConfig::default(),
-            gui: GuiConfig::default(),
-            performance: PerformanceConfig::default(),
-            compatibility: CompatibilityConfig::default(),
-            concealment: ConcealmentConfig::default(),
-        }
-    }
+    pub privacy: PrivacyConfig,
 }
 
 /// Explicit AppConfig → runtime mapping layer (dead-field documentation lives on structs).
@@ -427,11 +384,7 @@ pub struct RuntimeBindings {
 impl RuntimeBindings {
     #[must_use]
     pub fn from_config(config: &AppConfig, preview_enabled: bool) -> Self {
-        Self::from_config_with_preference(
-            config,
-            preview_enabled,
-            CaptureBackendPreference::Auto,
-        )
+        Self::from_config_with_preference(config, preview_enabled, CaptureBackendPreference::Auto)
     }
 
     #[must_use]
@@ -441,7 +394,8 @@ impl RuntimeBindings {
         backend_preference: CaptureBackendPreference,
     ) -> Self {
         let inference: InferenceSettings = (&config.vision_algorithms.yolo26_detection).into();
-        let model_input = ModelInputSize::new(inference.input_size.width, inference.input_size.height);
+        let model_input =
+            ModelInputSize::new(inference.input_size.width, inference.input_size.height);
         let mut compatibility: CompatibilityPolicy = (&config.compatibility).into();
         // Capture policy hard-lock: hooks are never allowed at runtime.
         compatibility.no_hook = true;
@@ -455,7 +409,7 @@ impl RuntimeBindings {
                 compatibility,
                 backend_preference,
             }
-            .sanitize_for_privacy(),
+            .normalize_for_display_capture(),
             hsv: (&config.vision_algorithms.hsv_tracking).into(),
             inference,
             yolo_enabled: config.vision_algorithms.yolo26_detection.enabled,
@@ -569,7 +523,7 @@ mod tests {
         );
         assert!(config.analytics.enabled);
         assert_eq!(config.performance.target_fps, 120);
-        assert!(config.concealment.enabled);
+        assert!(!config.privacy.exclude_own_windows_from_capture);
     }
 
     #[test]

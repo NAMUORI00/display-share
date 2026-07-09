@@ -15,15 +15,15 @@ Backlog for the Rust `capture-first` SmartScreenCapture workspace.
 
 ## Track 1: Capture Backends
 
-- [x] Windows Graphics Capture backend using `windows-capture`
-- [x] Backend selector that can choose `WGC` or `DXGI duplication` per target
+- [ ] Windows Graphics Capture backend using `windows-capture`
+- [ ] Backend selector that can choose `WGC` or `DXGI duplication` per target
 - [x] `DXGI duplication` backend implementation behind the existing `CaptureBackend` trait
 - [ ] Optional `OBS/libobs` adapter for compatibility fallback
 - [x] Capture target metadata for adapter, output name, refresh rate, and backend capability
 - [ ] Explicit fail-closed handling for unsupported or protected targets
 
 Completion criteria:
-- `Display` capture works with `WGC` and `DXGI duplication`
+- `Display` capture works with `DXGI duplication`; WGC remains future work
 - Backend choice is visible in UI and logs
 - Unsupported targets fail without crashes or hooks
 
