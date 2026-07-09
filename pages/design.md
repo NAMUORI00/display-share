@@ -32,7 +32,7 @@ flowchart TB
     I5[pipeline]
   end
   subgraph S[얇은 셸]
-    S1[display-share]
+    S1[smartscreencapture]
     S2[ui]
   end
   I --> C

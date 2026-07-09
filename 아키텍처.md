@@ -24,7 +24,7 @@ DXGI 캡처 스레드 (D3D11 only)
 ```mermaid
 flowchart TB
   subgraph Op[운영자]
-    UI[egui / eframe<br/>display-share]
+    UI[egui / eframe<br/>smartscreencapture]
   end
   subgraph Win[Windows]
     DISP[디스플레이]
@@ -52,7 +52,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  APP[display-share app]
+  APP[smartscreencapture app]
   APP --> UI[ui]
   APP --> CW[capture-windows]
   APP --> PIPE[pipeline]

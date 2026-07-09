@@ -48,7 +48,7 @@ Test-Path config\config.json
 ## 4. 빌드
 
 ```powershell
-cargo build --manifest-path capture-first/Cargo.toml -p display-share --release
+cargo build --manifest-path capture-first/Cargo.toml -p smartscreencapture --release
 ```
 
 ## 5. 자동 테스트
@@ -70,7 +70,7 @@ cargo test --manifest-path capture-first/Cargo.toml --workspace
 
 ## 6. 수동 스모크
 
-1. 루트에서 `display-share` 실행  
+1. 루트에서 `smartscreencapture` 실행  
 2. 디스플레이 열거  
 3. Start → 미리보기 갱신  
 4. (선택) HSV / YOLO — provider 상태 확인  

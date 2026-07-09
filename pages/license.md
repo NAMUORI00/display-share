@@ -6,7 +6,7 @@
 
 - `main` 브랜치 [`LICENSE`](https://github.com/NAMUORI00/display-share/blob/main/LICENSE)
 - Cargo workspace: `license = "MIT"` (`capture-first/Cargo.toml`)
-- 바이너리: `display-share` 및 워크스페이스 crates
+- 바이너리: `smartscreencapture` 및 워크스페이스 crates
 
 요약 (법적 효력은 영문 전문):
 

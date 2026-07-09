@@ -1,6 +1,6 @@
 # 시작하기
 
-SmartScreenCapture 앱(`display-share`)을 Windows에서 빌드·실행하는 방법입니다.
+SmartScreenCapture 앱(`smartscreencapture`)을 Windows에서 빌드·실행하는 방법입니다.
 
 ## 요구 사항
 
@@ -44,14 +44,14 @@ https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx
 
 ```powershell
 cargo check --manifest-path capture-first/Cargo.toml --workspace
-cargo build --manifest-path capture-first/Cargo.toml -p display-share
-cargo build --manifest-path capture-first/Cargo.toml -p display-share --release
+cargo build --manifest-path capture-first/Cargo.toml -p smartscreencapture
+cargo build --manifest-path capture-first/Cargo.toml -p smartscreencapture --release
 ```
 
 릴리스 바이너리 예:
 
 ```text
-capture-first/target/release/display-share.exe
+capture-first/target/release/smartscreencapture.exe
 ```
 
 ## 실행
@@ -59,16 +59,16 @@ capture-first/target/release/display-share.exe
 앱은 리포 루트의 `config/config.json` 을 찾습니다. **루트에서 실행**하세요.
 
 ```powershell
-cargo run --manifest-path capture-first/Cargo.toml -p display-share
+cargo run --manifest-path capture-first/Cargo.toml -p smartscreencapture
 # release
-cargo run --manifest-path capture-first/Cargo.toml -p display-share --release
+cargo run --manifest-path capture-first/Cargo.toml -p smartscreencapture --release
 ```
 
 로그 (기본은 quiet / `error` 수준):
 
 ```powershell
 $env:RUST_LOG = "info"
-cargo run --manifest-path capture-first/Cargo.toml -p display-share
+cargo run --manifest-path capture-first/Cargo.toml -p smartscreencapture
 ```
 
 ## 첫 실행 체크

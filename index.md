@@ -5,7 +5,7 @@ Windows 우선 **화면 캡처 + 비전 파이프라인** 앱 문서입니다.
 | 항목 | 값 |
 |------|-----|
 | 저장소 | [NAMUORI00/display-share](https://github.com/NAMUORI00/display-share) |
-| 앱 바이너리 | `display-share` (`capture-first/apps/smartscreencapture`) |
+| 앱 바이너리 | `smartscreencapture` (`capture-first/apps/smartscreencapture`) |
 | UI 표시명 | **SmartScreenCapture** |
 | 소스 | [`main`](https://github.com/NAMUORI00/display-share/tree/main) |
 | 문서 소스 | [`wiki`](https://github.com/NAMUORI00/display-share/tree/wiki) |
