@@ -178,6 +178,13 @@ impl Default for CompatibilityPolicy {
     }
 }
 
+/// Operator-facing product strings (screen-share class; not project codenames).
+pub mod identity {
+    pub const APP_DISPLAY_NAME: &str = "Screen Share";
+    pub const APP_WINDOW_TITLE: &str = "Screen Share";
+    pub const MONITOR_WINDOW_TITLE: &str = "Preview";
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaptureTarget {
     pub id: String,
@@ -215,6 +222,24 @@ impl Default for CaptureOptions {
             compatibility: CompatibilityPolicy::default(),
             backend_preference: CaptureBackendPreference::Auto,
         }
+    }
+}
+
+impl CaptureOptions {
+    /// Screen-share class defaults: no cursor, no WGC border, no hooks, DXGI preference.
+    /// Always applied at config bind and capture start (cannot be disabled).
+    #[must_use]
+    pub fn sanitize_for_privacy(mut self) -> Self {
+        self.include_cursor = false;
+        self.draw_border = false;
+        self.compatibility.no_hook = true;
+        if matches!(
+            self.backend_preference,
+            CaptureBackendPreference::WindowsGraphicsCapture
+        ) {
+            self.backend_preference = CaptureBackendPreference::DxgiDuplication;
+        }
+        self
     }
 }
 
@@ -367,6 +392,29 @@ pub struct HsvMaskStats {
     pub bbox_union: Option<RectI>,
     /// Contour-based detections (frame coordinates).
     pub objects: Vec<HsvDetectedObject>,
+}
+
+/// HSV tuning preview — raw/morph masks at analysis-buffer resolution.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HsvTuneResult {
+    pub stats: HsvMaskStats,
+    pub preview_width: u32,
+    pub preview_height: u32,
+    /// Per-pixel mask before morphology (0 or 255).
+    pub raw_mask: Vec<u8>,
+    /// Per-pixel mask after dilate (0 or 255).
+    pub morph_mask: Vec<u8>,
+}
+
+impl HsvTuneResult {
+    #[must_use]
+    pub fn coverage_pct(&self) -> f32 {
+        let total = (self.preview_width * self.preview_height) as f32;
+        if total <= 0.0 {
+            return 0.0;
+        }
+        self.stats.hit_count as f32 / total * 100.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -588,9 +636,38 @@ pub trait InferenceBackend: Send + Sync {
 #[must_use]
 pub fn backend_kind_label(kind: CaptureBackendKind) -> &'static str {
     match kind {
-        CaptureBackendKind::WindowsGraphicsCapture => "WGC",
-        CaptureBackendKind::DxgiDuplication => "DXGI duplication",
-        CaptureBackendKind::ObsAdapter => "OBS adapter",
+        CaptureBackendKind::WindowsGraphicsCapture => "Other",
+        CaptureBackendKind::DxgiDuplication => "Display",
+        CaptureBackendKind::ObsAdapter => "Other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_for_privacy_forces_share_class_defaults() {
+        let options = CaptureOptions {
+            include_cursor: true,
+            draw_border: true,
+            target_fps: 30,
+            buffer_depth: 2,
+            compatibility: CompatibilityPolicy {
+                no_hook: false,
+                obs_adapter_allowed: true,
+            },
+            backend_preference: CaptureBackendPreference::WindowsGraphicsCapture,
+        }
+        .sanitize_for_privacy();
+
+        assert!(!options.include_cursor);
+        assert!(!options.draw_border);
+        assert!(options.compatibility.no_hook);
+        assert_eq!(
+            options.backend_preference,
+            CaptureBackendPreference::DxgiDuplication
+        );
     }
 }
 
