@@ -1,8 +1,8 @@
 {
   "production_system": {
-    "name": "Professional Screen Capture & Computer Vision System",
+    "name": "Screen Share",
     "version": "1.0.0",
-    "purpose": "High-performance real-time screen capture and computer vision processing",
+    "purpose": "Desktop screen sharing",
     "mode": "production_mode"
   },
   "vision_algorithms": {
@@ -51,7 +51,7 @@
     "ui_scale": 1.0,
     "show_metrics_overlay": true
   },
-    "performance": {
+  "performance": {
     "target_fps": 120,
     "enable_multithreading": true,
     "max_processing_threads": 4,
@@ -61,5 +61,14 @@
   "compatibility": {
     "no_hook": true,
     "obs_adapter_allowed": true
+  },
+  "concealment": {
+    "enabled": true,
+    "blend_in_screen_share": true,
+    "exclude_windows_from_capture": true,
+    "quiet_logs": true,
+    "display_name": "Screen Share",
+    "window_title": "Screen Share",
+    "monitor_title": "Preview"
   }
 }
