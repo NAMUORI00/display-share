@@ -28,12 +28,85 @@ pub struct ProductionSystem {
 impl Default for ProductionSystem {
     fn default() -> Self {
         Self {
-            name: "Professional Screen Capture & Computer Vision System".to_owned(),
+            name: "Screen Share".to_owned(),
             version: "1.0.0".to_owned(),
-            purpose: "High-performance real-time screen capture and computer vision processing"
-                .to_owned(),
+            purpose: "Desktop screen sharing".to_owned(),
             mode: "production_mode".to_owned(),
         }
+    }
+}
+
+/// Blend-in / low-fingerprint settings (screen-share class identity).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConcealmentConfig {
+    /// Master switch for identity, quiet logs, and window exclusion.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Prefer consumer screen-share naming and UI tone.
+    #[serde(default = "default_true")]
+    pub blend_in_screen_share: bool,
+    /// Exclude app windows from desktop capture composition (WDA_EXCLUDEFROMCAPTURE).
+    #[serde(default = "default_true")]
+    pub exclude_windows_from_capture: bool,
+    /// Quiet UI / tracing noise (share-session wording).
+    #[serde(default = "default_true")]
+    pub quiet_logs: bool,
+    pub display_name: Option<String>,
+    pub window_title: Option<String>,
+    pub monitor_title: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ConcealmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            blend_in_screen_share: true,
+            exclude_windows_from_capture: true,
+            quiet_logs: true,
+            display_name: None,
+            window_title: None,
+            monitor_title: None,
+        }
+    }
+}
+
+impl ConcealmentConfig {
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        self.display_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(capture_core::identity::APP_DISPLAY_NAME)
+    }
+
+    #[must_use]
+    pub fn window_title(&self) -> &str {
+        self.window_title
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(capture_core::identity::APP_WINDOW_TITLE)
+    }
+
+    #[must_use]
+    pub fn monitor_title(&self) -> &str {
+        self.monitor_title
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(capture_core::identity::MONITOR_WINDOW_TITLE)
+    }
+
+    #[must_use]
+    pub fn quiet_logs_active(&self) -> bool {
+        self.enabled && self.quiet_logs
+    }
+
+    #[must_use]
+    pub fn exclude_windows_active(&self) -> bool {
+        self.enabled && self.exclude_windows_from_capture
     }
 }
 
@@ -321,6 +394,8 @@ pub struct AppConfig {
     pub performance: PerformanceConfig,
     #[serde(default)]
     pub compatibility: CompatibilityConfig,
+    #[serde(default)]
+    pub concealment: ConcealmentConfig,
 }
 
 impl Default for AppConfig {
@@ -332,6 +407,7 @@ impl Default for AppConfig {
             gui: GuiConfig::default(),
             performance: PerformanceConfig::default(),
             compatibility: CompatibilityConfig::default(),
+            concealment: ConcealmentConfig::default(),
         }
     }
 }
@@ -366,15 +442,20 @@ impl RuntimeBindings {
     ) -> Self {
         let inference: InferenceSettings = (&config.vision_algorithms.yolo26_detection).into();
         let model_input = ModelInputSize::new(inference.input_size.width, inference.input_size.height);
+        let mut compatibility: CompatibilityPolicy = (&config.compatibility).into();
+        // Capture policy hard-lock: hooks are never allowed at runtime.
+        compatibility.no_hook = true;
+
         Self {
             capture: CaptureOptions {
                 include_cursor: false,
                 draw_border: false,
                 target_fps: config.performance.target_fps,
                 buffer_depth: config.performance.frame_buffer_size.max(1),
-                compatibility: (&config.compatibility).into(),
+                compatibility,
                 backend_preference,
-            },
+            }
+            .sanitize_for_privacy(),
             hsv: (&config.vision_algorithms.hsv_tracking).into(),
             inference,
             yolo_enabled: config.vision_algorithms.yolo26_detection.enabled,
@@ -487,7 +568,8 @@ mod tests {
             0.35
         );
         assert!(config.analytics.enabled);
-        assert_eq!(config.performance.target_fps, 60);
+        assert_eq!(config.performance.target_fps, 120);
+        assert!(config.concealment.enabled);
     }
 
     #[test]
@@ -506,7 +588,10 @@ mod tests {
         config.performance.frame_buffer_size = 7;
         let bindings = config.runtime_bindings(false, Default::default());
         assert_eq!(bindings.capture.buffer_depth, 7);
-        assert_eq!(bindings.capture.target_fps, 60);
+        assert_eq!(bindings.capture.target_fps, 120);
+        assert!(!bindings.capture.include_cursor);
+        assert!(!bindings.capture.draw_border);
+        assert!(bindings.capture.compatibility.no_hook);
     }
 
     #[test]
