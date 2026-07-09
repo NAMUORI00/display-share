@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>display-share 문서</title>
-  <meta name="description" content="Windows 화면 캡처 · 비전 파이프라인 문서" />
+  <meta name="description" content="Windows 화면 캡처 · 비전 파이프라인 아키텍처·설계 문서" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <style>
     :root {
@@ -17,7 +17,7 @@
       --link-hover: #9ad0ff;
       --accent: #3d9cfd;
       --code-bg: #0b1016;
-      --sidebar-w: 260px;
+      --sidebar-w: 280px;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
@@ -41,23 +41,22 @@
       height: 100vh;
       overflow-y: auto;
     }
-    aside .brand {
-      font-weight: 700;
-      font-size: 1.1rem;
-      letter-spacing: 0.02em;
-      margin: 0 0 0.25rem;
-    }
-    aside .tag {
+    aside .brand { font-weight: 700; font-size: 1.1rem; margin: 0 0 0.25rem; }
+    aside .tag { color: var(--muted); font-size: 0.8rem; margin: 0 0 1rem; }
+    aside .nav-label {
       color: var(--muted);
-      font-size: 0.8rem;
-      margin: 0 0 1.25rem;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 0.9rem 0 0.35rem 0.35rem;
     }
     aside nav a {
       display: block;
       padding: 0.4rem 0.55rem;
       border-radius: 6px;
       color: var(--text);
-      margin-bottom: 0.15rem;
+      margin-bottom: 0.12rem;
+      font-size: 0.95rem;
     }
     aside nav a:hover { background: #243247; text-decoration: none; }
     aside nav a.active {
@@ -72,81 +71,58 @@
       font-size: 0.85rem;
     }
     aside .ext a { color: var(--muted); display: block; margin: 0.35rem 0; }
-    main {
-      flex: 1;
-      max-width: 880px;
-      padding: 2rem 2.25rem 4rem;
+    main { flex: 1; max-width: 960px; padding: 2rem 2.25rem 4rem; }
+    #status { color: var(--muted); font-size: 0.95rem; }
+    #content h1 {
+      font-size: 1.85rem; margin-top: 0;
+      border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;
     }
-    #status {
-      color: var(--muted);
-      font-size: 0.95rem;
-    }
-    #content h1 { font-size: 1.85rem; margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
     #content h2 { font-size: 1.35rem; margin-top: 2rem; }
     #content h3 { font-size: 1.1rem; margin-top: 1.4rem; }
     #content p, #content li { color: #d5deea; }
     #content table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 1rem 0;
-      font-size: 0.95rem;
+      border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.95rem;
     }
     #content th, #content td {
-      border: 1px solid var(--border);
-      padding: 0.5rem 0.7rem;
-      text-align: left;
-      vertical-align: top;
+      border: 1px solid var(--border); padding: 0.5rem 0.7rem;
+      text-align: left; vertical-align: top;
     }
     #content th { background: var(--panel); }
     #content tr:nth-child(even) td { background: rgba(26, 35, 50, 0.45); }
     #content code {
       font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-      font-size: 0.88em;
-      background: var(--code-bg);
-      padding: 0.12em 0.35em;
-      border-radius: 4px;
-      border: 1px solid var(--border);
+      font-size: 0.88em; background: var(--code-bg);
+      padding: 0.12em 0.35em; border-radius: 4px; border: 1px solid var(--border);
     }
     #content pre {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.9rem 1rem;
-      overflow-x: auto;
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.9rem 1rem; overflow-x: auto;
     }
-    #content pre code {
-      border: 0;
-      padding: 0;
-      background: transparent;
+    #content pre code { border: 0; padding: 0; background: transparent; }
+    #content .mermaid {
+      background: #121a24;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      margin: 1.25rem 0;
+      overflow-x: auto;
+      text-align: center;
     }
     #content blockquote {
-      margin: 1rem 0;
-      padding: 0.4rem 0 0.4rem 1rem;
-      border-left: 3px solid var(--accent);
-      color: var(--muted);
+      margin: 1rem 0; padding: 0.4rem 0 0.4rem 1rem;
+      border-left: 3px solid var(--accent); color: var(--muted);
     }
     #content hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
     .menu-btn {
-      display: none;
-      position: fixed;
-      top: 0.75rem;
-      left: 0.75rem;
-      z-index: 20;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 8px;
-      padding: 0.4rem 0.7rem;
-      cursor: pointer;
+      display: none; position: fixed; top: 0.75rem; left: 0.75rem; z-index: 20;
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 0.4rem 0.7rem; cursor: pointer;
     }
-    @media (max-width: 860px) {
+    @media (max-width: 900px) {
       .menu-btn { display: block; }
       aside {
-        position: fixed;
-        z-index: 15;
-        transform: translateX(-105%);
-        transition: transform 0.2s ease;
-        box-shadow: 8px 0 24px rgba(0,0,0,0.35);
+        position: fixed; z-index: 15; transform: translateX(-105%);
+        transition: transform 0.2s ease; box-shadow: 8px 0 24px rgba(0,0,0,0.35);
       }
       aside.open { transform: translateX(0); }
       main { padding: 3.5rem 1.1rem 3rem; }
@@ -158,7 +134,7 @@
   <div class="layout">
     <aside id="sidebar">
       <p class="brand">display-share</p>
-      <p class="tag">문서 · wiki 브랜치</p>
+      <p class="tag">문서 · 아키텍처 · 설계</p>
       <nav id="nav"></nav>
       <div class="ext">
         <a href="https://github.com/NAMUORI00/display-share" target="_blank" rel="noopener">GitHub 저장소</a>
@@ -172,17 +148,70 @@
     </main>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
   <script>
-    const PAGES = [
-      { id: "home", title: "홈", file: "pages/home.md" },
-      { id: "start", title: "시작하기", file: "pages/start.md" },
-      { id: "repro", title: "재현 가이드", file: "pages/repro.md" },
-      { id: "license", title: "라이선스", file: "pages/license.md" },
-      { id: "arch", title: "아키텍처", file: "pages/arch.md" },
-      { id: "config", title: "설정", file: "pages/config.md" },
-      { id: "model", title: "모델 가이드", file: "pages/model.md" },
-      { id: "status", title: "개발 현황", file: "pages/status.md" },
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "dark",
+      securityLevel: "loose",
+      flowchart: { htmlLabels: true, curve: "basis" },
+    });
+
+    const NAV_SECTIONS = [
+      {
+        label: "설계",
+        pages: [
+          { id: "home", title: "홈", file: "pages/home.md" },
+          { id: "arch", title: "아키텍처", file: "pages/arch.md" },
+          { id: "pipeline", title: "파이프라인", file: "pages/pipeline.md" },
+          { id: "design", title: "설계안", file: "pages/design.md" },
+          { id: "improvements", title: "개선점", file: "pages/improvements.md" },
+        ],
+      },
+      {
+        label: "사용 · 재현",
+        pages: [
+          { id: "start", title: "시작하기", file: "pages/start.md" },
+          { id: "repro", title: "재현 가이드", file: "pages/repro.md" },
+          { id: "config", title: "설정", file: "pages/config.md" },
+          { id: "model", title: "모델 가이드", file: "pages/model.md" },
+        ],
+      },
+      {
+        label: "기타",
+        pages: [
+          { id: "license", title: "라이선스", file: "pages/license.md" },
+          { id: "status", title: "개발 현황", file: "pages/status.md" },
+        ],
+      },
     ];
+
+    const PAGES = NAV_SECTIONS.flatMap((s) => s.pages);
+    const LINK_MAP = {
+      "시작하기.md": "start",
+      "재현-가이드.md": "repro",
+      "라이선스.md": "license",
+      "아키텍처.md": "arch",
+      "파이프라인.md": "pipeline",
+      "설계안.md": "design",
+      "개선점.md": "improvements",
+      "설정.md": "config",
+      "모델-가이드.md": "model",
+      "개발-현황.md": "status",
+      "Home.md": "home",
+      "index.md": "home",
+      "pages/home.md": "home",
+      "pages/arch.md": "arch",
+      "pages/pipeline.md": "pipeline",
+      "pages/design.md": "design",
+      "pages/improvements.md": "improvements",
+      "pages/start.md": "start",
+      "pages/repro.md": "repro",
+      "pages/config.md": "config",
+      "pages/model.md": "model",
+      "pages/license.md": "license",
+      "pages/status.md": "status",
+    };
 
     const nav = document.getElementById("nav");
     const content = document.getElementById("content");
@@ -190,12 +219,18 @@
     const sidebar = document.getElementById("sidebar");
     const menuBtn = document.getElementById("menuBtn");
 
-    PAGES.forEach((p) => {
-      const a = document.createElement("a");
-      a.href = "#" + p.id;
-      a.textContent = p.title;
-      a.dataset.id = p.id;
-      nav.appendChild(a);
+    NAV_SECTIONS.forEach((section) => {
+      const label = document.createElement("div");
+      label.className = "nav-label";
+      label.textContent = section.label;
+      nav.appendChild(label);
+      section.pages.forEach((p) => {
+        const a = document.createElement("a");
+        a.href = "#" + p.id;
+        a.textContent = p.title;
+        a.dataset.id = p.id;
+        nav.appendChild(a);
+      });
     });
 
     menuBtn.addEventListener("click", () => sidebar.classList.toggle("open"));
@@ -204,6 +239,22 @@
       nav.querySelectorAll("a").forEach((a) => {
         a.classList.toggle("active", a.dataset.id === id);
       });
+    }
+
+    async function renderMermaid(root) {
+      const blocks = root.querySelectorAll("pre code.language-mermaid");
+      const nodes = [];
+      blocks.forEach((code) => {
+        const pre = code.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = code.textContent;
+        pre.replaceWith(div);
+        nodes.push(div);
+      });
+      if (nodes.length) {
+        await mermaid.run({ nodes });
+      }
     }
 
     async function loadPage(id) {
@@ -216,34 +267,20 @@
         const res = await fetch(page.file, { cache: "no-cache" });
         if (!res.ok) throw new Error(res.status + " " + res.statusText);
         let md = await res.text();
-        // Drop YAML front matter if present
         if (md.startsWith("---")) {
           const end = md.indexOf("\n---", 3);
           if (end !== -1) md = md.slice(end + 4).replace(/^\s+/, "");
         }
         content.innerHTML = marked.parse(md);
+        content.querySelectorAll("a[href]").forEach((a) => {
+          const href = a.getAttribute("href") || "";
+          const base = href.split("#")[0];
+          if (LINK_MAP[base]) a.setAttribute("href", "#" + LINK_MAP[base]);
+        });
+        await renderMermaid(content);
         content.hidden = false;
         status.hidden = true;
         document.title = page.title + " · display-share";
-        // Rewrite internal .md links to hash routes
-        content.querySelectorAll("a[href]").forEach((a) => {
-          const href = a.getAttribute("href") || "";
-          const map = {
-            "시작하기.md": "start",
-            "재현-가이드.md": "repro",
-            "라이선스.md": "license",
-            "아키텍처.md": "arch",
-            "설정.md": "config",
-            "모델-가이드.md": "model",
-            "개발-현황.md": "status",
-            "Home.md": "home",
-            "index.md": "home",
-          };
-          const base = href.split("#")[0];
-          if (map[base]) {
-            a.setAttribute("href", "#" + map[base]);
-          }
-        });
         window.scrollTo(0, 0);
         sidebar.classList.remove("open");
       } catch (err) {
