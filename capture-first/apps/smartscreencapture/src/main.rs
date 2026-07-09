@@ -41,8 +41,8 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 320.0])
-            .with_min_inner_size([340.0, 260.0]),
+            .with_inner_size([440.0, 340.0])
+            .with_min_inner_size([380.0, 280.0]),
         ..Default::default()
     };
 
@@ -242,6 +242,7 @@ struct DesktopApp {
     hsv_tune_dirty: bool,
     last_hsv_tune_at: Instant,
     last_monitor_open: bool,
+    last_hsv_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +282,7 @@ impl DesktopApp {
             config,
             ..UiModel::default()
         });
+        let last_hsv_enabled = ui.model.config.vision_algorithms.hsv_tracking.enabled;
 
         Ok(Self {
             ui,
@@ -298,6 +300,7 @@ impl DesktopApp {
             hsv_tune_dirty: true,
             last_hsv_tune_at: Instant::now() - HSV_TUNE_INTERVAL,
             last_monitor_open: false,
+            last_hsv_enabled,
         })
     }
 
@@ -637,12 +640,17 @@ impl DesktopApp {
     }
 
     fn clear_hsv_tune_previews(&mut self) {
-        self.ui.model.hsv_tune_source = None;
-        self.ui.model.hsv_tune_raw = None;
-        self.ui.model.hsv_tune_morph = None;
-        self.ui.model.hsv_tune_overlay = None;
-        self.ui.model.hsv_tune_version = self.ui.model.hsv_tune_version.wrapping_add(1);
-        self.ui.model.hsv_coverage_pct = 0.0;
+        self.ui.reset_hsv_runtime_state();
+    }
+
+    /// When HSV is turned off, drop stale View overlays immediately.
+    fn sync_hsv_disable_cleanup(&mut self) {
+        let hsv_on = self.ui.model.config.vision_algorithms.hsv_tracking.enabled;
+        if self.last_hsv_enabled && !hsv_on {
+            self.ui.reset_hsv_runtime_state();
+            self.hsv_tune_dirty = false;
+        }
+        self.last_hsv_enabled = hsv_on;
     }
 
     fn refresh_hsv_tune_if_needed(&mut self) {
@@ -687,13 +695,40 @@ impl DesktopApp {
                     provider_state,
                     diagnostics,
                 } => {
-                    self.ui.model.hsv = hsv;
-                    if let (Some(tune), Some(analysis)) = (hsv_tune, self.last_analysis.as_ref()) {
-                        apply_hsv_tune_to_model(&mut self.ui.model, &tune, &analysis.roi_buffer);
-                        self.hsv_tune_dirty = false;
-                        self.last_hsv_tune_at = Instant::now();
+                    let hsv_on = self.ui.model.config.vision_algorithms.hsv_tracking.enabled;
+                    let yolo_on = self
+                        .ui
+                        .model
+                        .config
+                        .vision_algorithms
+                        .yolo26_detection
+                        .enabled;
+                    // Never re-apply HSV results after the feature is disabled.
+                    if hsv_on {
+                        self.ui.model.hsv = hsv;
+                        if let (Some(tune), Some(analysis)) =
+                            (hsv_tune, self.last_analysis.as_ref())
+                        {
+                            apply_hsv_tune_to_model(
+                                &mut self.ui.model,
+                                &tune,
+                                &analysis.roi_buffer,
+                            );
+                            self.hsv_tune_dirty = false;
+                            self.last_hsv_tune_at = Instant::now();
+                        }
+                    } else {
+                        self.ui.model.hsv = HsvMaskStats::default();
                     }
-                    self.ui.model.yolo_detections = yolo_detections;
+                    self.ui.model.yolo_detections = if yolo_on {
+                        yolo_detections
+                    } else {
+                        Vec::new()
+                    };
+                    // Avoid stale full-frame ROI metadata when no vision path is active.
+                    if !hsv_on && !yolo_on {
+                        self.ui.model.capture_roi = None;
+                    }
                     self.ui.model.capture_roi = Some(capture_roi);
                     self.ui.model.capture_frame_size = Some(capture_size);
                     self.ui.model.model_input_size = Some(model_input);
@@ -762,6 +797,7 @@ impl DesktopApp {
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_capture();
+        self.sync_hsv_disable_cleanup();
         if self.ui.model.hsv_tune_dirty {
             self.hsv_tune_dirty = true;
         }
@@ -857,6 +893,9 @@ fn cpu_buffer_to_color_image(buffer: &CpuBuffer) -> egui::ColorImage {
 }
 
 fn apply_hsv_tune_to_model(model: &mut UiModel, tune: &HsvTuneResult, source: &CpuBuffer) {
+    if !model.config.vision_algorithms.hsv_tracking.enabled {
+        return;
+    }
     model.hsv = tune.stats.clone();
     model.hsv_coverage_pct = tune.coverage_pct();
     model.hsv_tune_source = Some(cpu_buffer_to_color_image(source));
