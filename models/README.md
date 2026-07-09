@@ -26,7 +26,24 @@ models/
 
 ## 모델 준비
 
-Ultralytics가 제공하는 YOLO26 export 경로를 사용해 ONNX 파일을 준비합니다.
+### 방법 A — 공식 ONNX 직접 다운로드 (권장)
+
+Ultralytics [v8.4.0 릴리스](https://github.com/ultralytics/assets/releases/tag/v8.4.0)에 사전 export된 ONNX가 있습니다.
+
+```powershell
+# 프로젝트 루트에서
+.\scripts\download_yolo26n.ps1
+```
+
+또는 직접 URL:
+
+```text
+https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx
+```
+
+### 방법 B — 로컬 export
+
+Ultralytics Python으로 export:
 
 ```bash
 pip install ultralytics
