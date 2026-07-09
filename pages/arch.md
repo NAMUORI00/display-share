@@ -1,0 +1,112 @@
+---
+title: 아키텍처
+---
+
+# 아키텍처
+
+## 한 줄 요약
+
+Windows 캡처 스레드(D3D11/DXGI) → 분석용 CPU 프레임 → 비전 워커(HSV/YOLO) → 텔레메트리·egui UI.
+
+## 워크스페이스 레이아웃 (`main`)
+
+```text
+capture-first/
+├── apps/smartscreencapture/   # 바이너리: display-share
+└── crates/
+    ├── capture-core/          # 플랫폼 비의존 계약·타입
+    ├── capture-windows/       # DXGI/WGC 백엔드
+    ├── graphics-d3d11/        # D3D11 텍스처 구현
+    ├── config/                # JSON 설정 로드/저장
+    ├── pipeline/              # ROI · 분석 · 미리보기 파이프라인
+    ├── vision-gpu/            # HSV, CPU NCHW preprocess 등
+    ├── inference-dml/         # ort + DirectML/OpenVINO/CPU
+    ├── telemetry/             # 성능·상태 집계
+    └── ui/                    # egui 셸 모델·레이아웃
+```
+
+루트(저장소):
+
+```text
+config/          # 런타임 JSON
+models/          # ONNX · 클래스 (onnx는 로컬)
+scripts/         # 다운로드 스크립트
+testdata/        # 비전 샘플
+```
+
+## 크레이트 역할
+
+| 크레이트 | 책임 |
+|----------|------|
+| `capture-core` | `CaptureFrame`, ROI, 추론 설정, 에러 타입 등 **계약** |
+| `capture-windows` | 대상 열거, 세션, DXGI duplication, 프리뷰/분석 프레임 생산 |
+| `graphics-d3d11` | D3D11 디바이스·텍스처 핸들 (`GpuTexture` 구현) |
+| `config` | `AppConfig`, concealment, HSV 보조 파일 경로 |
+| `pipeline` | ROI vs `ModelInput`, HSV/YOLO 투입, 단일 readback 정책 |
+| `vision-gpu` | HSV 검출/튜닝, CPU preprocess (Track 2 GPU 전처리 예정) |
+| `inference-dml` | 세션 생성, provider 체인, YOLO 출력 파싱 |
+| `telemetry` | `TelemetryHub` 단일 집계 |
+| `ui` | 운영자 UI, 명령, 설정 편집 |
+| `display-share` | eframe 셸, 캡처 펌프, 비전 워커 스레드 연결 |
+
+## 런타임 데이터 흐름
+
+```text
+┌─────────────────────┐
+│  UI thread (eframe) │  명령: Start/Stop, 설정, 모델 로드
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐     PreviewFrame (CPU ColorImage)
+│ Capture thread      │──────────────────────────────────► UI 모니터 뷰
+│ (D3D11 on DXGI)     │
+└──────────┬──────────┘
+           │ AnalysisFrame (ROI CPU buffer)
+           ▼
+┌─────────────────────┐
+│ Vision worker       │  HSV / YOLO (InferenceBackend)
+│ (CPU-oriented)      │
+└──────────┬──────────┘
+           │ HsvMaskStats, DetectionResult, ProviderState
+           ▼
+┌─────────────────────┐
+│ Telemetry + UI model│
+└─────────────────────┘
+```
+
+설계 포인트:
+
+- **D3D11은 캡처 스레드에 유지** — UI/비전 스레드로 디바이스를 넘기지 않음
+- **미리보기 readback은 명시적·선택적** — 분석 경로와 정책을 분리
+- **추론은 `InferenceBackend` 트레이트** — 앱은 구현 세부보다 계약에 의존
+- **provider soft-fail** — DirectML 실패 시 OpenVINO → CPU
+
+## 캡처 백엔드
+
+- 런타임 해석은 DXGI 중심 (`prefer_wgc` 등이어도 DXGI로 resolve 되는 경로 존재)
+- 세션 `backend_kind` 가 소스 오브 트루스
+- 픽셀 포맷: BGRA 정규
+
+## 비전 · 추론
+
+| 알고리즘 | 설명 |
+|----------|------|
+| HSV | 범위 마스크, morphology, 튜닝 프리뷰 |
+| YOLO26 detect | ONNX, 권장 640×640, batch=1 |
+
+추론 EP 기본 순서:
+
+```json
+["directml", "openvino", "cpu"]
+```
+
+## 제품 identity / concealment
+
+설정 `concealment` 로 창 제목·표시 이름·캡처 제외(`WDA_EXCLUDEFROMCAPTURE`)·quiet log 등을 조정합니다.  
+기본 톤은 일반 화면 공유 유틸리티에 가깝게 맞춥니다.
+
+## 관련 페이지
+
+- [설정](설정.md)
+- [모델-가이드](모델-가이드.md)
+- [개발-현황](개발-현황.md)
