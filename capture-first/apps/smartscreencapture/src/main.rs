@@ -3,13 +3,13 @@
 
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use capture_core::{
     AnalysisFrame, CaptureBackend, CaptureBackendPreference, CaptureSession, CaptureRoi,
-    CpuBuffer, DetectionResult, HsvMaskStats, InferenceBackend, InferenceDiagnostics,
-    InferenceSettings, PixelFormat, ProviderState, Size2D, backend_kind_label,
+    CpuBuffer, DetectionResult, HsvMaskStats, HsvSettings, HsvTuneResult, InferenceBackend,
+    InferenceDiagnostics, InferenceSettings, PixelFormat, ProviderState, Size2D,
 };
 use capture_windows::WindowsCaptureBackend;
 use config::{
@@ -17,29 +17,74 @@ use config::{
     save_hsv_picker_settings,
 };
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded};
-use eframe::egui;
+use eframe::egui::{self, Color32};
 use inference_dml::DirectMlInferenceBackend;
 use pipeline::{FramePipeline, FramePipelineSettings};
 use telemetry::TelemetryHub;
 use ui::{SmartCaptureUi, UiCommand, UiModel};
+use vision_gpu::detect_hsv_with_preview;
 
 /// UI event-loop cadence while capturing (~60 Hz paint). Capture thread runs faster.
 const CAPTURE_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
+/// Throttle UI-thread HSV re-tune while dragging sliders.
+const HSV_TUNE_INTERVAL: Duration = Duration::from_millis(100);
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    // Quiet by default (share-session tone); override with RUST_LOG.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("error")),
+        )
+        .init();
 
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 320.0])
+            .with_min_inner_size([340.0, 260.0]),
         ..Default::default()
     };
 
+    let app = DesktopApp::bootstrap()?;
+    let window_title = app
+        .ui
+        .model
+        .config
+        .concealment
+        .window_title()
+        .to_owned();
     eframe::run_native(
-        "SmartScreenCapture Rust",
+        &window_title,
         options,
-        Box::new(|_cc| Ok(Box::new(DesktopApp::bootstrap()?))),
+        Box::new(move |_cc| Ok(Box::new(app))),
     )
     .map_err(|err| anyhow::anyhow!(err.to_string()))
+}
+
+/// Exclude this process's top-level windows from desktop capture composition.
+fn exclude_our_windows_from_capture() {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    use windows::core::BOOL;
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let our_pid = lparam.0 as u32;
+        let mut pid = 0u32;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == our_pid {
+                let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            }
+        }
+        BOOL(1)
+    }
+
+    let pid = unsafe { GetCurrentProcessId() };
+    let _ = unsafe { EnumWindows(Some(enum_proc), LPARAM(pid as isize)) };
 }
 
 enum WorkerCommand {
@@ -54,6 +99,7 @@ enum WorkerCommand {
 enum WorkerEvent {
     Frame {
         hsv: HsvMaskStats,
+        hsv_tune: Option<HsvTuneResult>,
         yolo_detections: Vec<DetectionResult>,
         capture_roi: CaptureRoi,
         capture_size: Size2D,
@@ -80,10 +126,8 @@ impl VisionWorker {
     fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = bounded::<WorkerCommand>(2);
         let (event_tx, event_rx) = bounded::<WorkerEvent>(4);
-        let handle = thread::Builder::new()
-            .name("vision-worker".to_owned())
-            .spawn(move || vision_worker_loop(cmd_rx, event_tx))
-            .expect("spawn vision worker");
+        // Unnamed thread — avoid capture-branded names in process tools.
+        let handle = thread::spawn(move || vision_worker_loop(cmd_rx, event_tx));
         Self {
             cmd_tx,
             event_rx,
@@ -163,6 +207,7 @@ fn vision_worker_loop(cmd_rx: Receiver<WorkerCommand>, event_tx: Sender<WorkerEv
                         let processing_ms = started.elapsed().as_secs_f64() * 1000.0;
                         let _ = event_tx.send(WorkerEvent::Frame {
                             hsv: report.hsv,
+                            hsv_tune: report.hsv_tune,
                             yolo_detections: report.yolo_detections,
                             capture_roi: report.capture_roi,
                             capture_size: report.capture_size,
@@ -193,6 +238,10 @@ struct DesktopApp {
     last_preview_enabled: bool,
     last_analysis_enabled: bool,
     yolo_autoload_done: bool,
+    last_analysis: Option<AnalysisFrame>,
+    hsv_tune_dirty: bool,
+    last_hsv_tune_at: Instant,
+    last_monitor_open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,7 +275,7 @@ impl DesktopApp {
 
         let ui = SmartCaptureUi::new(UiModel {
             targets,
-            backend_label: "DXGI Desktop Duplication (OBS-style)".to_owned(),
+            backend_label: "Display".to_owned(),
             backend_preference: CaptureBackendPreference::DxgiDuplication,
             config_path: Some(config_path.clone()),
             config,
@@ -245,6 +294,10 @@ impl DesktopApp {
             last_preview_enabled: false,
             last_analysis_enabled: false,
             yolo_autoload_done: false,
+            last_analysis: None,
+            hsv_tune_dirty: true,
+            last_hsv_tune_at: Instant::now() - HSV_TUNE_INTERVAL,
+            last_monitor_open: false,
         })
     }
 
@@ -268,7 +321,7 @@ impl DesktopApp {
                         self.ui.model.selected_target = 0;
                     }
                     self.ui.model.last_error = None;
-                    self.push_log("capture targets refreshed");
+                    self.push_log_quiet("targets refreshed", "targets refreshed");
                 }
                 Err(err) => self.ui.model.last_error = Some(err.to_string()),
             },
@@ -284,7 +337,10 @@ impl DesktopApp {
                     .yolo26_detection
                     .execution_providers
                     .join(", ");
-                self.push_log(format!("loading model with EP order: [{providers}]"));
+                self.push_log_quiet(
+                    "vision enabled",
+                    format!("loading model with EP order: [{providers}]"),
+                );
                 self.worker.load_model(settings);
             }
             UiCommand::SaveSettings => {
@@ -293,7 +349,7 @@ impl DesktopApp {
                 match config_to_save.save(&self.config_path) {
                     Ok(()) => {
                         self.ui.model.last_error = None;
-                        self.push_log(format!("settings saved to {}", self.config_path.display()));
+                        self.push_log_quiet("settings saved", "settings saved");
                     }
                     Err(err) => {
                         self.ui.model.last_error = Some(err.to_string());
@@ -306,8 +362,9 @@ impl DesktopApp {
                     Ok(mut picker) => {
                         picker.clamp_min_max();
                         picker.apply_to(&mut self.ui.model.config.vision_algorithms.hsv_tracking);
+                        self.ui.mark_hsv_tune_dirty();
                         self.ui.model.last_error = None;
-                        self.push_log(format!("HSV settings loaded from {}", path.display()));
+                        self.push_log_quiet("settings loaded", "HSV settings loaded");
                     }
                     Err(err) => self.ui.model.last_error = Some(err.to_string()),
                 }
@@ -321,7 +378,7 @@ impl DesktopApp {
                 match save_hsv_picker_settings(&path, &picker) {
                     Ok(()) => {
                         self.ui.model.last_error = None;
-                        self.push_log(format!("HSV settings saved to {}", path.display()));
+                        self.push_log_quiet("settings saved", "HSV settings saved");
                     }
                     Err(err) => self.ui.model.last_error = Some(err.to_string()),
                 }
@@ -362,14 +419,16 @@ impl DesktopApp {
                 self.session_fingerprint = self.current_fingerprint();
                 self.last_preview_enabled = false;
                 self.last_analysis_enabled = false;
-                self.push_log(format!(
-                    "capture started on {} via {} @ {} FPS (adapter={:?}, output={:?})",
-                    target.name,
-                    backend_kind_label(backend),
-                    self.ui.model.config.performance.target_fps,
-                    target.adapter_index,
-                    target.output_index
-                ));
+                if self.ui.model.config.concealment.exclude_windows_active() {
+                    exclude_our_windows_from_capture();
+                }
+                self.push_log_quiet(
+                    "sharing started",
+                    format!(
+                        "sharing started on {} @ {} FPS",
+                        target.name, self.ui.model.config.performance.target_fps
+                    ),
+                );
             }
             Err(err) => self.ui.model.last_error = Some(err.to_string()),
         }
@@ -379,6 +438,10 @@ impl DesktopApp {
         if let Some(session) = self.capture_session.take() {
             session.set_preview_enabled(false);
             session.set_analysis_enabled(false);
+            // Drain residual preview/analysis so stale frames do not linger.
+            while session.try_recv_preview().ok().flatten().is_some() {}
+            while session.try_recv_analysis().ok().flatten().is_some() {}
+            while session.try_recv().ok().flatten().is_some() {}
             let _ = session.stop();
         }
         self.ui.model.capture_running = false;
@@ -389,7 +452,9 @@ impl DesktopApp {
         self.ui.model.preview_frame = None;
         self.ui.model.preview_frame_version =
             self.ui.model.preview_frame_version.wrapping_add(1);
-        self.push_log("capture stopped");
+        self.last_analysis = None;
+        self.clear_hsv_tune_previews();
+        self.push_log_quiet("sharing stopped", "sharing stopped");
     }
 
     fn maybe_restart_capture_for_option_changes(&mut self) {
@@ -405,7 +470,7 @@ impl DesktopApp {
         if current == *previous {
             return;
         }
-        self.push_log("capture options changed — restarting DXGI session…");
+        self.push_log_quiet("session restarting…", "session options changed — restarting…");
         self.stop_capture();
         self.start_capture();
     }
@@ -468,7 +533,7 @@ impl DesktopApp {
         }
         self.yolo_autoload_done = true;
         let settings = (&self.ui.model.config.vision_algorithms.yolo26_detection).into();
-        self.push_log("YOLO enabled — loading model…");
+        self.push_log_quiet("vision enabled", "vision enabled — loading model…");
         self.worker.load_model(settings);
     }
 
@@ -531,6 +596,7 @@ impl DesktopApp {
                 }
             }
             if let Some(analysis) = latest_analysis {
+                self.last_analysis = Some(analysis.clone());
                 self.ui.model.capture_frame_size = Some(analysis.capture_size);
                 let bindings = self.ui.model.config.runtime_bindings(
                     self.ui.model.preview_enabled,
@@ -570,11 +636,49 @@ impl DesktopApp {
         self.ui.model.performance = self.telemetry.snapshot();
     }
 
+    fn clear_hsv_tune_previews(&mut self) {
+        self.ui.model.hsv_tune_source = None;
+        self.ui.model.hsv_tune_raw = None;
+        self.ui.model.hsv_tune_morph = None;
+        self.ui.model.hsv_tune_overlay = None;
+        self.ui.model.hsv_tune_version = self.ui.model.hsv_tune_version.wrapping_add(1);
+        self.ui.model.hsv_coverage_pct = 0.0;
+    }
+
+    fn refresh_hsv_tune_if_needed(&mut self) {
+        if !self.ui.needs_hsv_tune_refresh() {
+            return;
+        }
+        let Some(analysis) = self.last_analysis.as_ref() else {
+            return;
+        };
+        let now = Instant::now();
+        if !self.hsv_tune_dirty && now.duration_since(self.last_hsv_tune_at) < HSV_TUNE_INTERVAL {
+            return;
+        }
+
+        let hsv_settings: HsvSettings =
+            (&self.ui.model.config.vision_algorithms.hsv_tracking).into();
+        if !hsv_settings.enabled {
+            return;
+        }
+
+        let tune = detect_hsv_with_preview(
+            &analysis.roi_buffer,
+            &hsv_settings,
+            analysis.capture_size,
+        );
+        apply_hsv_tune_to_model(&mut self.ui.model, &tune, &analysis.roi_buffer);
+        self.hsv_tune_dirty = false;
+        self.last_hsv_tune_at = now;
+    }
+
     fn drain_worker_events(&mut self) {
         for event in self.worker.poll_events() {
             match event {
                 WorkerEvent::Frame {
                     hsv,
+                    hsv_tune,
                     yolo_detections,
                     capture_roi,
                     capture_size,
@@ -584,6 +688,11 @@ impl DesktopApp {
                     diagnostics,
                 } => {
                     self.ui.model.hsv = hsv;
+                    if let (Some(tune), Some(analysis)) = (hsv_tune, self.last_analysis.as_ref()) {
+                        apply_hsv_tune_to_model(&mut self.ui.model, &tune, &analysis.roi_buffer);
+                        self.hsv_tune_dirty = false;
+                        self.last_hsv_tune_at = Instant::now();
+                    }
                     self.ui.model.yolo_detections = yolo_detections;
                     self.ui.model.capture_roi = Some(capture_roi);
                     self.ui.model.capture_frame_size = Some(capture_size);
@@ -600,16 +709,21 @@ impl DesktopApp {
                     self.ui.model.provider_state = state;
                     self.ui.model.inference_diagnostics = diagnostics.clone();
                     self.ui.model.last_error = None;
-                    self.push_log(format!(
-                        "inference backend initialized: {}",
-                        provider_label_short(&self.ui.model.provider_state)
-                    ));
-                    self.push_log(summary);
-                    if let Some(reason) = diagnostics.fallback_reason {
-                        self.push_log(format!("provider fallback reason: {reason}"));
-                    }
-                    for note in diagnostics.validation_notes {
-                        self.push_log(format!("model validation: {note}"));
+                    self.push_log_quiet(
+                        "vision ready",
+                        format!(
+                            "inference backend initialized: {}",
+                            provider_label_short(&self.ui.model.provider_state)
+                        ),
+                    );
+                    if !self.ui.model.config.concealment.quiet_logs_active() {
+                        self.push_log(summary);
+                        if let Some(reason) = diagnostics.fallback_reason {
+                            self.push_log(format!("provider fallback reason: {reason}"));
+                        }
+                        for note in diagnostics.validation_notes {
+                            self.push_log(format!("model validation: {note}"));
+                        }
                     }
                 }
                 WorkerEvent::Failed(message) => {
@@ -622,7 +736,7 @@ impl DesktopApp {
                         self.yolo_autoload_done = false;
                     }
                     self.ui.model.last_error = Some(message.clone());
-                    self.push_log(format!("frame processing failed: {message}"));
+                    self.push_log_quiet("session error", format!("frame processing failed: {message}"));
                 }
             }
         }
@@ -634,19 +748,45 @@ impl DesktopApp {
             self.ui.model.logs.remove(0);
         }
     }
+
+    /// When quiet logs are on, show `quiet`; otherwise show `verbose`.
+    fn push_log_quiet(&mut self, quiet: impl Into<String>, verbose: impl Into<String>) {
+        if self.ui.model.config.concealment.quiet_logs_active() {
+            self.push_log(quiet);
+        } else {
+            self.push_log(verbose);
+        }
+    }
 }
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_capture();
+        if self.ui.model.hsv_tune_dirty {
+            self.hsv_tune_dirty = true;
+        }
+        self.refresh_hsv_tune_if_needed();
         let commands = self.ui.show(ctx);
         for command in commands {
             self.handle_command(command);
         }
         // Keep gates in sync after UI toggles Monitor open/close this frame.
+        let monitor_was_open = self.last_monitor_open;
         self.sync_session_gates();
-        if self.ui.model.capture_running {
+        let monitor_open = self.ui.monitor_is_open();
+        // Apply window exclusion only when needed (not every frame).
+        if self.ui.model.config.concealment.exclude_windows_active()
+            && monitor_open
+            && !monitor_was_open
+        {
+            exclude_our_windows_from_capture();
+        }
+        self.last_monitor_open = monitor_open;
+        if self.ui.model.capture_running || self.ui.needs_hsv_tune_refresh() {
             ctx.request_repaint_after(CAPTURE_REPAINT_INTERVAL);
+        }
+        if self.ui.model.hsv_tune_dirty {
+            ctx.request_repaint();
         }
     }
 }
@@ -714,6 +854,87 @@ fn cpu_buffer_to_color_image(buffer: &CpuBuffer) -> egui::ColorImage {
         }
     }
     egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba)
+}
+
+fn apply_hsv_tune_to_model(model: &mut UiModel, tune: &HsvTuneResult, source: &CpuBuffer) {
+    model.hsv = tune.stats.clone();
+    model.hsv_coverage_pct = tune.coverage_pct();
+    model.hsv_tune_source = Some(cpu_buffer_to_color_image(source));
+    model.hsv_tune_raw = Some(mask_to_color_image(
+        &tune.raw_mask,
+        tune.preview_width,
+        tune.preview_height,
+    ));
+    model.hsv_tune_morph = Some(mask_to_color_image(
+        &tune.morph_mask,
+        tune.preview_width,
+        tune.preview_height,
+    ));
+    if let Some(source_img) = &model.hsv_tune_source {
+        model.hsv_tune_overlay = Some(overlay_from_source_and_mask(
+            source_img,
+            &tune.morph_mask,
+            tune.preview_width,
+            tune.preview_height,
+        ));
+    }
+    model.hsv_tune_version = model.hsv_tune_version.wrapping_add(1);
+}
+
+fn mask_to_color_image(mask: &[u8], width: u32, height: u32) -> egui::ColorImage {
+    let w = width as usize;
+    let h = height as usize;
+    let mut rgba = vec![0u8; w * h * 4];
+    for (idx, alpha) in mask.iter().enumerate().take(w * h) {
+        let dst = idx * 4;
+        let v = if *alpha > 0 { 255 } else { 0 };
+        rgba[dst] = v;
+        rgba[dst + 1] = v;
+        rgba[dst + 2] = v;
+        rgba[dst + 3] = 255;
+    }
+    egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)
+}
+
+fn overlay_from_source_and_mask(
+    source: &egui::ColorImage,
+    mask: &[u8],
+    width: u32,
+    height: u32,
+) -> egui::ColorImage {
+    let w = width as usize;
+    let h = height as usize;
+    let mut pixels = source.pixels.clone();
+    let tint = Color32::from_rgba_premultiplied(217, 119, 6, 102);
+    for y in 0..h {
+        for x in 0..w {
+            let mask_idx = y * w + x;
+            if mask.get(mask_idx).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            let px_idx = mask_idx;
+            if px_idx >= pixels.len() {
+                continue;
+            }
+            let base = pixels[px_idx];
+            let t = 0.45;
+            pixels[px_idx] = Color32::from_rgba_unmultiplied(
+                lerp_u8(base.r(), tint.r(), t),
+                lerp_u8(base.g(), tint.g(), t),
+                lerp_u8(base.b(), tint.b(), t),
+                base.a().max(tint.a()),
+            );
+        }
+    }
+    egui::ColorImage {
+        size: [w, h],
+        pixels,
+        source_size: source.source_size,
+    }
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    ((a as f32) * (1.0 - t) + (b as f32) * t).round().clamp(0.0, 255.0) as u8
 }
 
 fn provider_label_short(state: &ProviderState) -> String {
