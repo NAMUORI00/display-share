@@ -168,9 +168,12 @@ pub struct Yolo26Config {
     pub confidence_threshold: f32,
     pub max_detections: usize,
     pub input_size: [u32; 2],
-    /// Ignored until EP selection UI / EP 선택 UI 전까지 하드코딩 [directml, cpu].
+    /// Ordered EP names wired into session init: `directml`, `openvino`, `cpu`, or `auto`.
     pub execution_providers: Vec<String>,
     pub selected_gpu_id: usize,
+    /// OpenVINO device_type override (`GPU`, `NPU`, …). None = try GPU then NPU.
+    #[serde(default)]
+    pub openvino_device_type: Option<String>,
 }
 
 impl Default for Yolo26Config {
@@ -182,8 +185,9 @@ impl Default for Yolo26Config {
             confidence_threshold: 0.25,
             max_detections: 100,
             input_size: [640, 640],
-            execution_providers: vec!["directml".to_owned(), "cpu".to_owned()],
+            execution_providers: capture_core::default_execution_providers(),
             selected_gpu_id: 0,
+            openvino_device_type: None,
         }
     }
 }
@@ -197,6 +201,12 @@ impl From<&Yolo26Config> for InferenceSettings {
             confidence_threshold: value.confidence_threshold,
             max_detections: value.max_detections,
             selected_device_id: value.selected_gpu_id,
+            execution_providers: if value.execution_providers.is_empty() {
+                capture_core::default_execution_providers()
+            } else {
+                value.execution_providers.clone()
+            },
+            openvino_device_type: value.openvino_device_type.clone(),
         }
     }
 }

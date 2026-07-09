@@ -348,6 +348,34 @@ pub struct InferenceSettings {
     pub confidence_threshold: f32,
     pub max_detections: usize,
     pub selected_device_id: usize,
+    /// Ordered EP names: `directml`, `openvino`, `cpu`, or `auto`.
+    pub execution_providers: Vec<String>,
+    /// OpenVINO device_type override (`GPU`, `NPU`, `GPU.0`, …). None = try GPU then NPU.
+    pub openvino_device_type: Option<String>,
+}
+
+impl Default for InferenceSettings {
+    fn default() -> Self {
+        Self {
+            model_path: PathBuf::new(),
+            class_names_path: PathBuf::new(),
+            input_size: Size2D::new(640, 640),
+            confidence_threshold: 0.25,
+            max_detections: 100,
+            selected_device_id: 0,
+            execution_providers: default_execution_providers(),
+            openvino_device_type: None,
+        }
+    }
+}
+
+#[must_use]
+pub fn default_execution_providers() -> Vec<String> {
+    vec![
+        "directml".to_owned(),
+        "openvino".to_owned(),
+        "cpu".to_owned(),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +384,9 @@ pub enum ProviderState {
     DirectMl {
         device_id: usize,
         cpu_fallback: bool,
+    },
+    OpenVino {
+        device_type: String,
     },
     CpuFallback,
     Failed(String),

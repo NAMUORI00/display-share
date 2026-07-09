@@ -50,7 +50,8 @@
                 640
             ],
             "execution_providers": [
-                "cuda",
+                "directml",
+                "openvino",
                 "cpu"
             ],
             "selected_gpu_id": 0

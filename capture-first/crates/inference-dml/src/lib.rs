@@ -1,4 +1,4 @@
-//! DirectML-first inference: ort session + tensor bind + YOLO parse.
+//! Multi-vendor inference: DirectML / OpenVINO / CPU via ort EP chain.
 //! Preprocess (resize/NCHW) lives in `vision-gpu` / `pipeline`.
 
 use std::fs;
@@ -6,13 +6,21 @@ use std::fs;
 use capture_core::{
     CpuNchwTensor, DetectionResult, InferenceBackend, InferenceDiagnostics, InferenceError,
     InferenceIoDescriptor, InferenceModelMetadata, InferenceSettings, ProviderState, RectI,
-    Size2D, TensorInputHandle,
+    Size2D, TensorInputHandle, default_execution_providers,
 };
 use ort::ep;
+use ort::ep::ExecutionProviderDispatch;
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::{Outlet, TensorRef};
 use tracing::warn;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderKind {
+    DirectMl,
+    OpenVino,
+    Cpu,
+}
 
 pub struct DirectMlInferenceBackend {
     session: Option<Session>,
@@ -157,11 +165,32 @@ impl DirectMlInferenceBackend {
             }
         }
     }
+
+    fn try_commit_session(
+        &self,
+        model_path: &std::path::Path,
+        providers: Vec<ExecutionProviderDispatch>,
+    ) -> Result<Session, InferenceError> {
+        Session::builder()
+            .map_err(|err| InferenceError::Other(err.to_string()))?
+            .with_execution_providers(providers)
+            .map_err(|err| InferenceError::Other(err.to_string()))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|err| InferenceError::Other(err.to_string()))?
+            .commit_from_file(model_path)
+            .map_err(|err| InferenceError::Other(err.to_string()))
+    }
 }
 
 impl InferenceBackend for DirectMlInferenceBackend {
     fn backend_name(&self) -> &'static str {
-        "DirectML"
+        match &self.provider_state {
+            ProviderState::DirectMl { .. } => "DirectML",
+            ProviderState::OpenVino { .. } => "OpenVINO",
+            ProviderState::CpuFallback => "CPU",
+            ProviderState::Failed(_) => "Failed",
+            ProviderState::Uninitialized => "Uninitialized",
+        }
     }
 
     fn initialize(&mut self, settings: InferenceSettings) -> Result<ProviderState, InferenceError> {
@@ -185,65 +214,90 @@ impl InferenceBackend for DirectMlInferenceBackend {
 
         self.load_class_names(&settings)?;
 
-        let directml = ep::DirectML::default()
-            .with_device_id(settings.selected_device_id as i32)
-            .build();
-        let cpu = ep::CPUExecutionProvider::default().build();
+        let providers = normalize_execution_providers(&settings.execution_providers);
+        let openvino_devices = resolve_openvino_device_types(settings.openvino_device_type.as_deref());
+        let mut attempt_log = Vec::new();
 
-        let session = Session::builder()
-            .map_err(|err| InferenceError::Other(err.to_string()))?
-            .with_execution_providers([directml, cpu])
-            .map_err(|err| InferenceError::Other(err.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|err| InferenceError::Other(err.to_string()))?
-            .commit_from_file(&settings.model_path)
-            .map_err(|err| {
-                warn!("DirectML session creation failed, retrying CPU: {err}");
-                InferenceError::Other(err.to_string())
-            });
-
-        match session {
-            Ok(session) => {
-                self.sync_session_diagnostics(&session);
-                self.session = Some(session);
-                self.provider_state = ProviderState::DirectMl {
-                    device_id: settings.selected_device_id,
-                    cpu_fallback: false,
-                };
-                self.diagnostics.fallback_reason = None;
-                self.clear_last_error();
-                Ok(self.provider_state.clone())
-            }
-            Err(first_error) => {
-                let fallback_reason = first_error.to_string();
-                let cpu_session = Session::builder()
-                    .map_err(|err| InferenceError::Other(err.to_string()))?
-                    .with_execution_providers([ep::CPUExecutionProvider::default().build()])
-                    .map_err(|err| InferenceError::Other(err.to_string()))?
-                    .commit_from_file(&settings.model_path)
-                    .map_err(|err| InferenceError::Other(err.to_string()));
-
-                match cpu_session {
-                    Ok(session) => {
-                        self.sync_session_diagnostics(&session);
-                        self.session = Some(session);
-                        self.provider_state = ProviderState::CpuFallback;
-                        self.diagnostics.fallback_reason = Some(fallback_reason);
-                        self.clear_last_error();
-                        Ok(self.provider_state.clone())
+        for kind in &providers {
+            match kind {
+                ProviderKind::DirectMl => {
+                    let ep = ep::DirectML::default()
+                        .with_device_id(settings.selected_device_id as i32)
+                        .build();
+                    match self.try_commit_session(&settings.model_path, vec![ep]) {
+                        Ok(session) => {
+                            self.sync_session_diagnostics(&session);
+                            self.session = Some(session);
+                            self.provider_state = ProviderState::DirectMl {
+                                device_id: settings.selected_device_id,
+                                cpu_fallback: false,
+                            };
+                            self.diagnostics.fallback_reason =
+                                fallback_reason_from_attempts(&attempt_log);
+                            self.clear_last_error();
+                            return Ok(self.provider_state.clone());
+                        }
+                        Err(err) => {
+                            warn!("DirectML session failed: {err}");
+                            attempt_log.push(format!("directml: {err}"));
+                        }
                     }
-                    Err(cpu_error) => {
-                        let combined = format!(
-                            "DirectML init failed: {first_error}; CPU fallback failed: {cpu_error}"
-                        );
-                        self.provider_state = ProviderState::Failed(cpu_error.to_string());
-                        self.diagnostics.fallback_reason = Some(first_error.to_string());
-                        self.set_last_error_message(combined.clone());
-                        Err(InferenceError::Other(combined))
+                }
+                ProviderKind::OpenVino => {
+                    for device_type in &openvino_devices {
+                        let ep = ep::OpenVINO::default()
+                            .with_device_type(device_type)
+                            .build();
+                        match self.try_commit_session(&settings.model_path, vec![ep]) {
+                            Ok(session) => {
+                                self.sync_session_diagnostics(&session);
+                                self.session = Some(session);
+                                self.provider_state = ProviderState::OpenVino {
+                                    device_type: device_type.clone(),
+                                };
+                                self.diagnostics.fallback_reason =
+                                    fallback_reason_from_attempts(&attempt_log);
+                                self.clear_last_error();
+                                return Ok(self.provider_state.clone());
+                            }
+                            Err(err) => {
+                                warn!("OpenVINO ({device_type}) session failed: {err}");
+                                attempt_log
+                                    .push(format!("openvino/{device_type}: {err}"));
+                            }
+                        }
+                    }
+                }
+                ProviderKind::Cpu => {
+                    let ep = ep::CPUExecutionProvider::default().build();
+                    match self.try_commit_session(&settings.model_path, vec![ep]) {
+                        Ok(session) => {
+                            self.sync_session_diagnostics(&session);
+                            self.session = Some(session);
+                            self.provider_state = ProviderState::CpuFallback;
+                            self.diagnostics.fallback_reason =
+                                fallback_reason_from_attempts(&attempt_log);
+                            self.clear_last_error();
+                            return Ok(self.provider_state.clone());
+                        }
+                        Err(err) => {
+                            warn!("CPU session failed: {err}");
+                            attempt_log.push(format!("cpu: {err}"));
+                        }
                     }
                 }
             }
         }
+
+        let combined = if attempt_log.is_empty() {
+            "no execution providers configured".to_owned()
+        } else {
+            format!("all providers failed: {}", attempt_log.join("; "))
+        };
+        self.provider_state = ProviderState::Failed(combined.clone());
+        self.diagnostics.fallback_reason = Some(combined.clone());
+        self.set_last_error_message(combined.clone());
+        Err(InferenceError::Other(combined))
     }
 
     fn provider_state(&self) -> ProviderState {
@@ -265,6 +319,58 @@ impl InferenceBackend for DirectMlInferenceBackend {
 
     fn diagnostics(&self) -> InferenceDiagnostics {
         self.diagnostics.clone()
+    }
+}
+
+/// Normalize config EP names: `auto` → default order, dedupe, skip unknowns.
+#[must_use]
+pub fn normalize_execution_providers(raw: &[String]) -> Vec<ProviderKind> {
+    let defaults = default_execution_providers();
+    let use_defaults = raw.is_empty()
+        || raw
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("auto"));
+    let expanded: Vec<&str> = if use_defaults {
+        defaults.iter().map(String::as_str).collect()
+    } else {
+        raw.iter().map(String::as_str).collect()
+    };
+
+    let mut out = Vec::new();
+    for name in expanded {
+        let kind = match name.trim().to_ascii_lowercase().as_str() {
+            "directml" | "dml" => Some(ProviderKind::DirectMl),
+            "openvino" | "ov" => Some(ProviderKind::OpenVino),
+            "cpu" => Some(ProviderKind::Cpu),
+            "auto" => None,
+            other => {
+                warn!("skipping unknown execution provider `{other}`");
+                None
+            }
+        };
+        if let Some(kind) = kind {
+            if !out.contains(&kind) {
+                out.push(kind);
+            }
+        }
+    }
+    out
+}
+
+/// OpenVINO device_type list: explicit override, or GPU then NPU.
+#[must_use]
+pub fn resolve_openvino_device_types(override_type: Option<&str>) -> Vec<String> {
+    if let Some(device) = override_type.map(str::trim).filter(|s| !s.is_empty()) {
+        return vec![device.to_owned()];
+    }
+    vec!["GPU".to_owned(), "NPU".to_owned()]
+}
+
+fn fallback_reason_from_attempts(attempts: &[String]) -> Option<String> {
+    if attempts.is_empty() {
+        None
+    } else {
+        Some(attempts.join("; "))
     }
 }
 
@@ -575,7 +681,10 @@ fn limit_results(mut results: Vec<DetectionResult>, max_detections: usize) -> Ve
 
 #[cfg(test)]
 mod tests {
-    use super::{build_validation_notes, is_supported_output_shape, parse_detections};
+    use super::{
+        ProviderKind, build_validation_notes, is_supported_output_shape, normalize_execution_providers,
+        parse_detections, resolve_openvino_device_types,
+    };
     use capture_core::{InferenceIoDescriptor, Size2D};
 
     #[test]
@@ -666,5 +775,66 @@ mod tests {
     fn dynamic_output_shape_is_treated_as_supported() {
         assert!(is_supported_output_shape(&[-1, -1, 84]));
         assert!(is_supported_output_shape(&[1, -1, 8400]));
+    }
+
+    #[test]
+    fn auto_expands_to_default_provider_order() {
+        let providers = normalize_execution_providers(&["auto".to_owned()]);
+        assert_eq!(
+            providers,
+            vec![
+                ProviderKind::DirectMl,
+                ProviderKind::OpenVino,
+                ProviderKind::Cpu
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_providers_use_default_order() {
+        let providers = normalize_execution_providers(&[]);
+        assert_eq!(
+            providers,
+            vec![
+                ProviderKind::DirectMl,
+                ProviderKind::OpenVino,
+                ProviderKind::Cpu
+            ]
+        );
+    }
+
+    #[test]
+    fn dedupes_and_skips_unknown_providers() {
+        let providers = normalize_execution_providers(&[
+            "DirectML".to_owned(),
+            "openvino".to_owned(),
+            "directml".to_owned(),
+            "unknown-ep".to_owned(),
+            "cpu".to_owned(),
+        ]);
+        assert_eq!(
+            providers,
+            vec![
+                ProviderKind::DirectMl,
+                ProviderKind::OpenVino,
+                ProviderKind::Cpu
+            ]
+        );
+    }
+
+    #[test]
+    fn openvino_device_types_default_to_gpu_then_npu() {
+        assert_eq!(
+            resolve_openvino_device_types(None),
+            vec!["GPU".to_owned(), "NPU".to_owned()]
+        );
+        assert_eq!(
+            resolve_openvino_device_types(Some("NPU")),
+            vec!["NPU".to_owned()]
+        );
+        assert_eq!(
+            resolve_openvino_device_types(Some("  GPU.0  ")),
+            vec!["GPU.0".to_owned()]
+        );
     }
 }

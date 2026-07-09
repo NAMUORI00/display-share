@@ -325,6 +325,26 @@ impl TabViewer for WorkspaceViewer<'_> {
                         .selected_gpu_id
                 ));
                 ui.label(format!(
+                    "EP order: {}",
+                    self.model
+                        .config
+                        .vision_algorithms
+                        .yolo26_detection
+                        .execution_providers
+                        .join(", ")
+                ));
+                if let Some(device) = &self
+                    .model
+                    .config
+                    .vision_algorithms
+                    .yolo26_detection
+                    .openvino_device_type
+                {
+                    ui.label(format!("OpenVINO device: {device}"));
+                } else {
+                    ui.label("OpenVINO device: GPU then NPU (auto)");
+                }
+                ui.label(format!(
                     "Loaded classes: {}",
                     self.model.inference_diagnostics.class_count
                 ));
@@ -342,7 +362,7 @@ impl TabViewer for WorkspaceViewer<'_> {
                 if let Some(reason) = &self.model.inference_diagnostics.fallback_reason {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        format!("DirectML fallback: {reason}"),
+                        format!("Provider fallback chain: {reason}"),
                     );
                 }
                 if let Some(error) = &self.model.inference_diagnostics.last_error {
@@ -480,6 +500,7 @@ fn provider_label(state: &ProviderState) -> String {
             "DirectML device {device_id}{}",
             if *cpu_fallback { " (fallback)" } else { "" }
         ),
+        ProviderState::OpenVino { device_type } => format!("OpenVINO {device_type}"),
         ProviderState::CpuFallback => "CPU fallback".to_owned(),
         ProviderState::Failed(message) => format!("failed: {message}"),
     }

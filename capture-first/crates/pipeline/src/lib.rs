@@ -10,7 +10,7 @@ use config::RuntimeBindings;
 use thiserror::Error;
 use vision_gpu::GpuVisionPipeline;
 
-/// Default operator capture ROI (legacy C++ CenterRegionCapture contract).
+/// Default operator capture ROI (320×320 center crop contract).
 pub const DEFAULT_CAPTURE_ROI: Size2D = Size2D::new(320, 320);
 
 #[derive(Debug, Error)]
@@ -228,6 +228,8 @@ mod tests {
                 confidence_threshold: 0.25,
                 max_detections: 100,
                 selected_device_id: 0,
+                execution_providers: capture_core::default_execution_providers(),
+                openvino_device_type: None,
             },
             yolo_enabled: false,
             preview_enabled: false,
