@@ -14,7 +14,7 @@ pub fn resolve_backend(
         Ok(CaptureBackendKind::DxgiDuplication)
     } else {
         Err(CaptureError::BackendUnavailable(format!(
-            "DXGI Desktop Duplication is not available for {} (adapter={:?}, output={:?}, device={:?})",
+            "Display session is not available for {} (adapter={:?}, output={:?}, device={:?})",
             target.name,
             target.adapter_index,
             target.output_index,

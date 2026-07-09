@@ -11,5 +11,11 @@ graphics-d3d11 = { path = "../graphics-d3d11" }
 parking_lot.workspace = true
 thiserror.workspace = true
 vision-gpu = { path = "../vision-gpu" }
-windows-capture.workspace = true
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+] }

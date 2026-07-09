@@ -26,7 +26,8 @@ use windows::core::Interface;
 
 use crate::device::{create_device_for_adapter, shared_device_for_adapter};
 use crate::enumerate::{
-    DxgiOutputInfo, WgcMonitorInfo, enumerate_dxgi_outputs, enumerate_wgc_monitors, utf16_to_string,
+    DisplayMonitorInfo, DxgiOutputInfo, enumerate_display_monitors, enumerate_dxgi_outputs,
+    utf16_to_string,
 };
 
 const REINIT_BACKOFF_START: Duration = Duration::from_millis(50);
@@ -45,9 +46,9 @@ const ANALYSIS_CHANNEL_DEPTH: usize = 1;
 pub struct DxgiDuplicationBackend;
 
 impl DxgiDuplicationBackend {
-    pub fn enumerate_targets_with_wgc(
+    pub fn enumerate_targets_with_monitors(
         &self,
-        monitors: &[WgcMonitorInfo],
+        monitors: &[DisplayMonitorInfo],
     ) -> Result<Vec<CaptureTarget>, CaptureError> {
         let dxgi_outputs = enumerate_dxgi_outputs()?;
         if dxgi_outputs.is_empty() {
@@ -98,7 +99,7 @@ impl DxgiDuplicationBackend {
 
 impl CaptureBackend for DxgiDuplicationBackend {
     fn enumerate_targets(&self) -> Result<Vec<CaptureTarget>, CaptureError> {
-        self.enumerate_targets_with_wgc(&enumerate_wgc_monitors().unwrap_or_default())
+        self.enumerate_targets_with_monitors(&enumerate_display_monitors().unwrap_or_default())
     }
 
     fn start(
@@ -110,6 +111,7 @@ impl CaptureBackend for DxgiDuplicationBackend {
             return Err(CaptureError::UnsupportedTarget(target.id.clone()));
         }
 
+        let options = options.sanitize_for_privacy();
         let binding = resolve_output_binding(target)?;
         let (sender, receiver) = bounded(options.buffer_depth.max(1));
         let (preview_tx, preview_rx) = bounded(PREVIEW_CHANNEL_DEPTH);
@@ -130,29 +132,24 @@ impl CaptureBackend for DxgiDuplicationBackend {
         let thread_preview_enabled = preview_enabled.clone();
         let thread_analysis_enabled = analysis_enabled.clone();
         let thread_last_error = last_error.clone();
-        let handle = thread::Builder::new()
-            .name(format!(
-                "dxgi-capture-{}-{}",
-                binding.adapter_index, binding.output_index
-            ))
-            .spawn(move || {
-                let result = run_dxgi_capture_loop(
-                    binding,
-                    options,
-                    sender,
-                    preview_tx,
-                    analysis_tx,
-                    thread_total_frames,
-                    thread_dropped_frames,
-                    thread_stop_requested,
-                    thread_preview_enabled,
-                    thread_analysis_enabled,
-                );
-                if let Err(err) = result {
-                    *thread_last_error.lock() = Some(err.to_string());
-                }
-            })
-            .map_err(|err| CaptureError::Other(err.to_string()))?;
+        // Unnamed thread — avoid capture-branded thread names in process tools.
+        let handle = thread::spawn(move || {
+            let result = run_dxgi_capture_loop(
+                binding,
+                options,
+                sender,
+                preview_tx,
+                analysis_tx,
+                thread_total_frames,
+                thread_dropped_frames,
+                thread_stop_requested,
+                thread_preview_enabled,
+                thread_analysis_enabled,
+            );
+            if let Err(err) = result {
+                *thread_last_error.lock() = Some(err.to_string());
+            }
+        });
 
         Ok(Box::new(DxgiCaptureSession {
             receiver,
@@ -403,7 +400,7 @@ fn run_dxgi_capture_loop(
                     return Err(err);
                 }
 
-                // OBS-style: do not kill the worker on ACCESS_LOST — backoff and reopen.
+                // Do not kill the worker on ACCESS_LOST — backoff and reopen.
                 loop {
                     if stop_requested.load(Ordering::Relaxed) {
                         return Ok(());
