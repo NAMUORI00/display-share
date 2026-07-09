@@ -1,11 +1,11 @@
 # display-share
 
 Windows 우선 **화면 캡처 + 비전 파이프라인** 프로젝트입니다.  
-Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI/WGC), HSV 추적, YOLO26 ONNX 추론, egui 데스크톱 셸을 제공합니다.
+Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI Desktop Duplication), HSV 추적, YOLO26 ONNX 추론, egui 데스크톱 셸을 제공합니다.
 
 | 항목 | 내용 |
 |------|------|
-| 앱 바이너리 | `display-share` (`capture-first/apps/smartscreencapture`) |
+| 앱 바이너리 | `smartscreencapture` (`capture-first/apps/smartscreencapture`) |
 | 플랫폼 | Windows 10/11 (D3D11, DirectML, 선택적 OpenVINO) |
 | 라이선스 | [MIT](./LICENSE) (앱 소스) |
 | 문서 사이트 | **[GitHub Pages](https://NAMUORI00.github.io/display-share/)** (`wiki` 브랜치) |
@@ -34,10 +34,10 @@ cd display-share
 .\scripts\download_yolo26n.ps1
 
 # 앱 실행 (debug)
-cargo run --manifest-path capture-first/Cargo.toml -p display-share
+cargo run --manifest-path capture-first/Cargo.toml -p smartscreencapture
 
 # 릴리스
-cargo run --manifest-path capture-first/Cargo.toml -p display-share --release
+cargo run --manifest-path capture-first/Cargo.toml -p smartscreencapture --release
 ```
 
 설정은 저장소 루트의 `config/config.json`, 클래스 라벨은 `models/coco_classes.txt`를 사용합니다.  
@@ -54,7 +54,7 @@ cargo test --manifest-path capture-first/Cargo.toml --workspace
 ```text
 display-share/
 ├── capture-first/          # Rust workspace (앱 + crates)
-│   ├── apps/smartscreencapture/   # display-share 바이너리
+│   ├── apps/smartscreencapture/   # smartscreencapture 바이너리
 │   └── crates/             # capture-core, capture-windows, inference-dml, …
 ├── config/                 # config.json, hsv_settings.json
 ├── models/                 # ONNX · 클래스 파일 (*.onnx 는 gitignore)
@@ -71,12 +71,15 @@ display-share/
 | 문서 | 링크 |
 |------|------|
 | 홈 | https://NAMUORI00.github.io/display-share/ |
+| 아키텍처 | https://NAMUORI00.github.io/display-share/#arch |
+| 파이프라인 | https://NAMUORI00.github.io/display-share/#pipeline |
+| 설계안 | https://NAMUORI00.github.io/display-share/#design |
+| 개선점 | https://NAMUORI00.github.io/display-share/#improvements |
 | 시작하기 | https://NAMUORI00.github.io/display-share/#start |
 | 재현 가이드 | https://NAMUORI00.github.io/display-share/#repro |
-| 라이선스 | https://NAMUORI00.github.io/display-share/#license |
-| 아키텍처 | https://NAMUORI00.github.io/display-share/#arch |
 | 설정 | https://NAMUORI00.github.io/display-share/#config |
 | 모델 가이드 | https://NAMUORI00.github.io/display-share/#model |
+| 라이선스 | https://NAMUORI00.github.io/display-share/#license |
 | 개발 현황 | https://NAMUORI00.github.io/display-share/#status |
 
 로컬에서 wiki 소스만 보려면:
