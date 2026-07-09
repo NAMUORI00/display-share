@@ -1,18 +1,16 @@
----
-title: 시작하기
----
-
 # 시작하기
+
+SmartScreenCapture 앱(`display-share`)을 Windows에서 빌드·실행하는 방법입니다.
 
 ## 요구 사항
 
 | 구분 | 내용 |
 |------|------|
-| OS | Windows 10 또는 11 (캡처·D3D11·DirectML 경로) |
-| 언어 툴체인 | [Rust](https://rustup.rs/) stable (workspace `edition = "2024"`) |
-| 링커 | MSVC — Visual Studio Build Tools의 **C++ 데스크톱 개발** 권장 |
-| GPU | DirectML 가능 GPU 권장 (없으면 CPU EP로 soft-fail) |
-| 선택 | [OpenVINO Runtime](https://docs.openvino.ai/latest/openvino_docs_install_guides_installing_openvino_from_archive_windows.html) (Intel GPU/NPU) |
+| OS | Windows 10 또는 11 |
+| 툴체인 | [Rust](https://rustup.rs/) stable (`edition = "2024"`) |
+| 링커 | MSVC (Visual Studio Build Tools — C++ 데스크톱 개발) |
+| GPU | DirectML 가능 GPU 권장 (없으면 CPU EP soft-fail) |
+| 선택 | [OpenVINO Runtime](https://docs.openvino.ai/) — Intel GPU/NPU |
 | 선택 | YOLO 사용 시 `models/yolo26n.onnx` |
 
 ## 클론
@@ -23,65 +21,84 @@ cd display-share
 git switch main
 ```
 
-## (선택) 모델 다운로드
+## (선택) YOLO 모델
 
-ONNX는 git에 포함되지 않습니다 (`models/*.onnx` ignore).
+ONNX는 git에 없습니다 (`models/*.onnx` ignore).
 
 ```powershell
 .\scripts\download_yolo26n.ps1
 ```
 
-직접 받을 경우:
+또는:
 
 ```text
 https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx
 → models/yolo26n.onnx
 ```
 
-클래스 파일 `models/coco_classes.txt`는 저장소에 포함되어 있습니다.
+클래스 목록 `models/coco_classes.txt` 는 저장소에 포함됩니다.
 
 ## 빌드
 
-```powershell
-# 워크스페이스 체크
-cargo check --manifest-path capture-first/Cargo.toml --workspace
+저장소 **루트**에서:
 
-# display-share 바이너리
+```powershell
+cargo check --manifest-path capture-first/Cargo.toml --workspace
 cargo build --manifest-path capture-first/Cargo.toml -p display-share
 cargo build --manifest-path capture-first/Cargo.toml -p display-share --release
 ```
 
+릴리스 바이너리 예:
+
+```text
+capture-first/target/release/display-share.exe
+```
+
 ## 실행
 
-앱은 저장소 **루트**를 기준으로 `config/config.json`을 찾습니다.  
-루트에서 실행하는 것을 권장합니다.
+앱은 리포 루트의 `config/config.json` 을 찾습니다. **루트에서 실행**하세요.
 
 ```powershell
 cargo run --manifest-path capture-first/Cargo.toml -p display-share
-# 또는 release
+# release
 cargo run --manifest-path capture-first/Cargo.toml -p display-share --release
 ```
 
-로그 레벨 (기본은 quiet / `error`):
+로그 (기본은 quiet / `error` 수준):
 
 ```powershell
 $env:RUST_LOG = "info"
 cargo run --manifest-path capture-first/Cargo.toml -p display-share
 ```
 
-## 설정 위치
+## 첫 실행 체크
 
-| 파일 | 역할 |
+1. 창 제목 **SmartScreenCapture** 로 기동  
+2. 디스플레이 목록 열거  
+3. Start → 모니터 미리보기 갱신  
+4. (선택) HSV / YOLO 토글 — YOLO는 모델 파일 필요  
+5. 설정 저장 → `config/config.json` 반영  
+
+## 설정 파일
+
+| 경로 | 역할 |
 |------|------|
-| `config/config.json` | 메인 설정 (비전, 성능, GUI, concealment 등) |
-| `config/hsv_settings.json` | HSV 피커 보조 설정 |
-| `models/yolo26n.onnx` | YOLO26 detect 모델 |
-| `models/coco_classes.txt` | 클래스 이름 (COCO 순서) |
+| `config/config.json` | 메인 설정 (`privacy`, 비전, 성능 …) |
+| `config/hsv_settings.json` | HSV 피커 보조 |
+| `models/yolo26n.onnx` | YOLO26 detect |
+| `models/coco_classes.txt` | COCO 클래스명 |
 
-필드 설명은 [설정](설정.md) 페이지를 보세요.
+필드 상세: [설정](설정.md)
 
-## 다음 단계
+## 문제 해결
 
-- 깨끗한 재현·검증: [재현-가이드](재현-가이드.md)
-- 모델·EP 문제: [모델-가이드](모델-가이드.md)
-- 코드 구조: [아키텍처](아키텍처.md)
+| 증상 | 확인 |
+|------|------|
+| 설정/모델 못 찾음 | 저장소 루트에서 실행했는지 |
+| YOLO 초기화 실패 | `models/yolo26n.onnx` 존재, [모델 가이드](모델-가이드.md) |
+| OpenVINO 안 뜸 | Runtime 설치 여부 — 없으면 다음 EP로 soft-fail |
+| 캡처 실패 | 디스플레이/GPU 드라이버, DXGI 세션 권한 |
+
+## 다음
+
+- [재현 가이드](재현-가이드.md) · [아키텍처](아키텍처.md) · [파이프라인](파이프라인.md)

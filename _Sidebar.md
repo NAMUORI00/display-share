@@ -1,6 +1,6 @@
 **display-share**
 
-- [홈]({{ site.baseurl }}/)
+- [홈](https://NAMUORI00.github.io/display-share/)
 - **설계**
   - [아키텍처](아키텍처.md)
   - [파이프라인](파이프라인.md)
@@ -16,6 +16,4 @@
   - [개발 현황](개발-현황.md)
 
 ---
-
-[소스 (main)](https://github.com/NAMUORI00/display-share/tree/main)
-· [Pages](https://NAMUORI00.github.io/display-share/)
+[소스 main](https://github.com/NAMUORI00/display-share/tree/main) · [Pages](https://NAMUORI00.github.io/display-share/)

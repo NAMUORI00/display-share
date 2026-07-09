@@ -1,68 +1,53 @@
----
-title: 라이선스
----
-
 # 라이선스
 
-## 앱 소스 코드 (이 저장소)
+## 앱 소스 코드
 
-**라이선스: MIT**
+**MIT License**
 
-- `main` 브랜치 루트 [`LICENSE`](https://github.com/NAMUORI00/display-share/blob/main/LICENSE)
-- Cargo workspace: `capture-first/Cargo.toml` 의 `license = "MIT"`
-- 바이너리 패키지명: `display-share` 및 워크스페이스 crates
+- `main` 브랜치 [`LICENSE`](https://github.com/NAMUORI00/display-share/blob/main/LICENSE)
+- Cargo workspace: `license = "MIT"` (`capture-first/Cargo.toml`)
+- 바이너리: `display-share` 및 워크스페이스 crates
 
-MIT 요약(법적 효력은 영문 전문 기준):
+요약 (법적 효력은 영문 전문):
 
-- 사용, 복제, 수정, 병합, 배포, 판매 허용
-- 저작권·허가 고지 유지 의무
+- 사용·복제·수정·배포·판매 허용
+- 저작권·허가 고지 유지
 - 무보증 (AS IS)
 
-Copyright 표기: `Copyright (c) 2026 NAMUORI00 and display-share contributors`  
-(기여자 표기는 프로젝트 관례에 따라 갱신될 수 있습니다.)
+Copyright: `Copyright (c) 2026 NAMUORI00 and display-share contributors`
 
-### 이 wiki 브랜치 문서
+### 이 wiki 문서
 
-위키 마크다운 문서도 별도 표기가 없으면 **동일 MIT** 로 취급합니다.  
-외부 인용 시 저장소 URL과 `wiki` 브랜치/페이지 이름을 밝혀 주세요.
+별도 표기가 없으면 문서도 **MIT** 로 취급합니다.  
+인용 시 저장소 URL과 `wiki` 브랜치/페이지를 밝혀 주세요.
 
 ---
 
-## 서드파티 · 모델 · 런타임
+## 서드파티
 
-앱 소스가 MIT라도, **함께 배포하는 바이너리·모델·런타임**에는 다른 조건이 붙을 수 있습니다.
+앱 소스가 MIT여도 **모델·런타임·의존성**은 다른 조건일 수 있습니다.
 
 ### YOLO26 / Ultralytics
 
 | 항목 | 내용 |
 |------|------|
-| 모델 예 | `yolo26n.onnx` (Ultralytics assets v8.4.0 등) |
-| 주의 | Ultralytics 학습 가중치·export 산출물은 **AGPL-3.0** 또는 **별도 상업 라이선스** 대상일 수 있음 |
-| 권고 | 상업 배포·폐쇄망 배포 전에 [Ultralytics 라이선스](https://github.com/ultralytics/ultralytics) 조건을 직접 검토 |
+| 예 | `yolo26n.onnx` |
+| 주의 | AGPL-3.0 또는 별도 상업 라이선스 가능 |
+| 권고 | 상업 배포 전 Ultralytics 조건을 직접 검토 |
 
-이 저장소는 모델을 git에 넣지 않습니다. 사용자는 스스로 모델을 내려받거나 export합니다.
+모델은 git에 포함하지 않습니다. 사용자가 직접 다운로드/export 합니다.
 
-### ONNX Runtime (`ort` crate)
+### ONNX Runtime (`ort`)
 
-- 앱은 `ort` 를 통해 ONNX Runtime을 사용합니다.
-- 바이너리 배포 시 ONNX Runtime 및 포함 dylib(DirectML 연동 등) 고지를 확인하세요.
-- 프로젝트 설정: `download-binaries`, `directml`, `openvino` feature 등 (`capture-first/Cargo.toml` workspace deps).
+- DirectML / OpenVINO feature 로 바이너리 연동
+- 재배포 시 ONNX Runtime 고지 확인
 
-### DirectML
+### DirectML / OpenVINO
 
-- Windows / Microsoft DirectML 실행 공급자.
-- OS·GPU 드라이버·DirectML 런타임 라이선스는 Microsoft 정책을 따릅니다.
+- Microsoft DirectML, Intel OpenVINO 각 배포 라이선스
+- OpenVINO Runtime 미설치 시 soft-fail
 
-### OpenVINO
-
-- Intel OpenVINO Runtime 및 OpenVINO EP.
-- 런타임 설치·재배포 조건은 [Intel OpenVINO](https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html) 라이선스를 따릅니다.
-- 런타임이 없으면 해당 EP는 **soft-fail** 후 다음 provider로 넘어갑니다.
-
-### Rust 의존 크레이트
-
-- `eframe` / `egui`, `windows`, `serde`, `image` 등 다수.
-- 배포 시 `cargo license` 등으로 SPDX 목록을 뽑는 것을 권장합니다.
+### Rust crates
 
 ```powershell
 cargo install cargo-license
@@ -71,15 +56,12 @@ cargo license --manifest-path capture-first/Cargo.toml
 
 ---
 
-## 배포 체크리스트 (권장)
+## 배포 체크리스트
 
-- [ ] 앱 소스 MIT 고지(`LICENSE`) 포함
-- [ ] ONNX 모델을 포함할 경우 Ultralytics/원 출처 라이선스 적합 여부 확인
-- [ ] ONNX Runtime / DirectML / OpenVINO 재배포 고지
-- [ ] `cargo license` 결과 아카이브
-- [ ] 사용자 데이터·캡처 영상에 대한 개인정보·약관은 제품 정책으로 별도 정의
+- [ ] `LICENSE` (MIT) 포함
+- [ ] ONNX 포함 시 Ultralytics 조건 적합
+- [ ] ORT / DirectML / OpenVINO 재배포 고지
+- [ ] `cargo license` 결과 보관
+- [ ] 캡처 영상에 대한 개인정보 정책은 제품 정책으로 별도
 
-## 면책
-
-이 위키의 라이선스 설명은 **안내**이며 법률 자문이 아닙니다.  
-배포·상업 이용 전에는 원문 라이선스와 필요 시 전문가 검토를 받으세요.
+이 문서는 안내이며 법률 자문이 아닙니다.
