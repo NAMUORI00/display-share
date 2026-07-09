@@ -8,4 +8,3 @@ license.workspace = true
 capture-core = { path = "../capture-core" }
 config = { path = "../config" }
 egui.workspace = true
-egui_dock.workspace = true
