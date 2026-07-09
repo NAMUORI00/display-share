@@ -71,13 +71,13 @@ display-share/
 | 문서 | 링크 |
 |------|------|
 | 홈 | https://NAMUORI00.github.io/display-share/ |
-| 시작하기 | https://NAMUORI00.github.io/display-share/시작하기.html |
-| 재현 가이드 | https://NAMUORI00.github.io/display-share/재현-가이드.html |
-| 라이선스 | https://NAMUORI00.github.io/display-share/라이선스.html |
-| 아키텍처 | https://NAMUORI00.github.io/display-share/아키텍처.html |
-| 설정 | https://NAMUORI00.github.io/display-share/설정.html |
-| 모델 가이드 | https://NAMUORI00.github.io/display-share/모델-가이드.html |
-| 개발 현황 | https://NAMUORI00.github.io/display-share/개발-현황.html |
+| 시작하기 | https://NAMUORI00.github.io/display-share/#start |
+| 재현 가이드 | https://NAMUORI00.github.io/display-share/#repro |
+| 라이선스 | https://NAMUORI00.github.io/display-share/#license |
+| 아키텍처 | https://NAMUORI00.github.io/display-share/#arch |
+| 설정 | https://NAMUORI00.github.io/display-share/#config |
+| 모델 가이드 | https://NAMUORI00.github.io/display-share/#model |
+| 개발 현황 | https://NAMUORI00.github.io/display-share/#status |
 
 로컬에서 wiki 소스만 보려면:
 
@@ -91,7 +91,7 @@ git show wiki:index.md
 ## 라이선스
 
 - **앱 소스 코드**: [MIT License](./LICENSE)
-- **YOLO26 / Ultralytics 모델 자산**: 별도 조건(AGPL-3.0 또는 상업 라이선스 등)이 적용될 수 있습니다. 배포 전 [모델 가이드](./models/README.md)와 [라이선스 문서](https://NAMUORI00.github.io/display-share/라이선스.html)를 확인하세요.
+- **YOLO26 / Ultralytics 모델 자산**: 별도 조건(AGPL-3.0 또는 상업 라이선스 등)이 적용될 수 있습니다. 배포 전 [모델 가이드](./models/README.md)와 [라이선스 문서](https://NAMUORI00.github.io/display-share/#license)를 확인하세요.
 - **ONNX Runtime / DirectML / OpenVINO**: 각 벤더 배포 라이선스를 따릅니다.
 
 ## 관련 문서 (main 브랜치)
