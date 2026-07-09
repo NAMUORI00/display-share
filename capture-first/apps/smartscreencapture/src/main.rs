@@ -1,20 +1,30 @@
-//! Thin eframe shell — capture pump + UI commands. Frame orchestration lives in `pipeline`.
+//! Thin eframe shell — capture pump on UI thread; vision on a CPU-only worker.
+//! D3D11 stays on the DXGI capture thread. Monitor preview is a CPU ColorImage channel.
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use anyhow::Result;
 use capture_core::{
-    CaptureBackend, CaptureSession, CpuBuffer, InferenceBackend, InferenceDiagnostics, PixelFormat,
-    backend_kind_label,
+    AnalysisFrame, CaptureBackend, CaptureBackendPreference, CaptureSession, CaptureRoi,
+    CpuBuffer, DetectionResult, HsvMaskStats, InferenceBackend, InferenceDiagnostics,
+    InferenceSettings, PixelFormat, ProviderState, Size2D, backend_kind_label,
 };
 use capture_windows::WindowsCaptureBackend;
-use config::AppConfig;
+use config::{
+    AppConfig, HsvPickerSettings, hsv_settings_path_for_config, load_hsv_picker_settings,
+    save_hsv_picker_settings,
+};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded};
 use eframe::egui;
 use inference_dml::DirectMlInferenceBackend;
 use pipeline::{FramePipeline, FramePipelineSettings};
 use telemetry::TelemetryHub;
 use ui::{SmartCaptureUi, UiCommand, UiModel};
+
+/// UI event-loop cadence while capturing (~60 Hz paint). Capture thread runs faster.
+const CAPTURE_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
@@ -32,15 +42,166 @@ fn main() -> Result<()> {
     .map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 
+enum WorkerCommand {
+    Process {
+        analysis: AnalysisFrame,
+        settings: FramePipelineSettings,
+    },
+    LoadModel(InferenceSettings),
+    Shutdown,
+}
+
+enum WorkerEvent {
+    Frame {
+        hsv: HsvMaskStats,
+        yolo_detections: Vec<DetectionResult>,
+        capture_roi: CaptureRoi,
+        capture_size: Size2D,
+        model_input: Size2D,
+        processing_ms: f64,
+        provider_state: ProviderState,
+        diagnostics: InferenceDiagnostics,
+    },
+    ModelReady {
+        state: ProviderState,
+        diagnostics: InferenceDiagnostics,
+        summary: String,
+    },
+    Failed(String),
+}
+
+struct VisionWorker {
+    cmd_tx: Sender<WorkerCommand>,
+    event_rx: Receiver<WorkerEvent>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl VisionWorker {
+    fn spawn() -> Self {
+        let (cmd_tx, cmd_rx) = bounded::<WorkerCommand>(2);
+        let (event_tx, event_rx) = bounded::<WorkerEvent>(4);
+        let handle = thread::Builder::new()
+            .name("vision-worker".to_owned())
+            .spawn(move || vision_worker_loop(cmd_rx, event_tx))
+            .expect("spawn vision worker");
+        Self {
+            cmd_tx,
+            event_rx,
+            handle: Some(handle),
+        }
+    }
+
+    fn try_submit(&self, analysis: AnalysisFrame, settings: FramePipelineSettings) -> bool {
+        match self
+            .cmd_tx
+            .try_send(WorkerCommand::Process { analysis, settings })
+        {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => false,
+            Err(TrySendError::Disconnected(_)) => false,
+        }
+    }
+
+    fn load_model(&self, settings: InferenceSettings) {
+        let _ = self.cmd_tx.send(WorkerCommand::LoadModel(settings));
+    }
+
+    fn poll_events(&self) -> Vec<WorkerEvent> {
+        let mut events = Vec::new();
+        loop {
+            match self.event_rx.try_recv() {
+                Ok(event) => events.push(event),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        events
+    }
+}
+
+impl Drop for VisionWorker {
+    fn drop(&mut self) {
+        let _ = self.cmd_tx.send(WorkerCommand::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn vision_worker_loop(cmd_rx: Receiver<WorkerCommand>, event_tx: Sender<WorkerEvent>) {
+    let pipeline = FramePipeline::new();
+    let mut inference = DirectMlInferenceBackend::default();
+
+    while let Ok(command) = cmd_rx.recv() {
+        match command {
+            WorkerCommand::Shutdown => break,
+            WorkerCommand::LoadModel(settings) => match inference.initialize(settings) {
+                Ok(state) => {
+                    let diagnostics = inference.diagnostics();
+                    let summary = inference_summary(&diagnostics);
+                    let _ = event_tx.send(WorkerEvent::ModelReady {
+                        state,
+                        diagnostics,
+                        summary,
+                    });
+                }
+                Err(err) => {
+                    let _ = event_tx.send(WorkerEvent::Failed(err.to_string()));
+                }
+            },
+            WorkerCommand::Process {
+                analysis,
+                mut settings,
+            } => {
+                // Preview is produced on the capture thread — never request GPU readback here.
+                settings.want_preview_buffer = false;
+                settings.preview_enabled = false;
+
+                let started = std::time::Instant::now();
+                match pipeline.process_analysis_roi(&analysis, &settings, Some(&mut inference)) {
+                    Ok(report) => {
+                        let processing_ms = started.elapsed().as_secs_f64() * 1000.0;
+                        let _ = event_tx.send(WorkerEvent::Frame {
+                            hsv: report.hsv,
+                            yolo_detections: report.yolo_detections,
+                            capture_roi: report.capture_roi,
+                            capture_size: report.capture_size,
+                            model_input: report.model_input,
+                            processing_ms,
+                            provider_state: inference.provider_state(),
+                            diagnostics: inference.diagnostics(),
+                        });
+                    }
+                    Err(err) => {
+                        let _ = event_tx.send(WorkerEvent::Failed(err.to_string()));
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct DesktopApp {
     ui: SmartCaptureUi,
     capture_backend: WindowsCaptureBackend,
     capture_session: Option<Box<dyn CaptureSession>>,
-    inference: DirectMlInferenceBackend,
+    worker: VisionWorker,
     telemetry: TelemetryHub,
-    pipeline: FramePipeline,
     config_path: PathBuf,
     repo_root: PathBuf,
+    session_fingerprint: Option<SessionFingerprint>,
+    last_preview_enabled: bool,
+    last_analysis_enabled: bool,
+    yolo_autoload_done: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionFingerprint {
+    selected_target: usize,
+    target_id: String,
+    target_fps: u32,
+    buffer_depth: u32,
+    backend_preference: CaptureBackendPreference,
 }
 
 impl DesktopApp {
@@ -54,13 +215,19 @@ impl DesktopApp {
             .unwrap_or_else(|| config_paths[0].clone());
         let mut config = AppConfig::load_from_candidates(&config_paths)?;
         resolve_model_paths(&mut config, &repo_root);
+        let hsv_path = hsv_settings_path_for_config(&config_path);
+        if let Ok(mut picker) = load_hsv_picker_settings(&hsv_path) {
+            picker.clamp_min_max();
+            picker.apply_to(&mut config.vision_algorithms.hsv_tracking);
+        }
 
         let capture_backend = WindowsCaptureBackend::new();
         let targets = capture_backend.enumerate_targets().unwrap_or_default();
 
         let ui = SmartCaptureUi::new(UiModel {
             targets,
-            backend_label: "Windows capture selector (WGC / DXGI)".to_owned(),
+            backend_label: "DXGI Desktop Duplication (OBS-style)".to_owned(),
+            backend_preference: CaptureBackendPreference::DxgiDuplication,
             config_path: Some(config_path.clone()),
             config,
             ..UiModel::default()
@@ -70,11 +237,25 @@ impl DesktopApp {
             ui,
             capture_backend,
             capture_session: None,
-            inference: DirectMlInferenceBackend::default(),
+            worker: VisionWorker::spawn(),
             telemetry: TelemetryHub::default(),
-            pipeline: FramePipeline::new(),
             config_path,
             repo_root,
+            session_fingerprint: None,
+            last_preview_enabled: false,
+            last_analysis_enabled: false,
+            yolo_autoload_done: false,
+        })
+    }
+
+    fn current_fingerprint(&self) -> Option<SessionFingerprint> {
+        let target = self.ui.model.targets.get(self.ui.model.selected_target)?;
+        Some(SessionFingerprint {
+            selected_target: self.ui.model.selected_target,
+            target_id: target.id.clone(),
+            target_fps: self.ui.model.config.performance.target_fps,
+            buffer_depth: self.ui.model.config.performance.frame_buffer_size as u32,
+            backend_preference: self.ui.model.backend_preference,
         })
     }
 
@@ -91,48 +272,8 @@ impl DesktopApp {
                 }
                 Err(err) => self.ui.model.last_error = Some(err.to_string()),
             },
-            UiCommand::StartCapture => {
-                if self.capture_session.is_some() {
-                    return;
-                }
-                let Some(target) = self
-                    .ui
-                    .model
-                    .targets
-                    .get(self.ui.model.selected_target)
-                    .cloned()
-                else {
-                    self.ui.model.last_error = Some("no capture target selected".to_owned());
-                    return;
-                };
-                let bindings = self.ui.model.config.runtime_bindings(
-                    self.ui.model.preview_enabled,
-                    self.ui.model.backend_preference,
-                );
-                match self.capture_backend.start(&target, bindings.capture) {
-                    Ok(session) => {
-                        let backend = session.backend_kind();
-                        self.capture_session = Some(session);
-                        self.ui.model.capture_running = true;
-                        self.ui.model.active_backend = Some(backend);
-                        self.ui.model.last_error = None;
-                        self.push_log(format!(
-                            "capture started on {} via {}",
-                            target.name,
-                            backend_kind_label(backend)
-                        ));
-                    }
-                    Err(err) => self.ui.model.last_error = Some(err.to_string()),
-                }
-            }
-            UiCommand::StopCapture => {
-                if let Some(session) = self.capture_session.take() {
-                    let _ = session.stop();
-                }
-                self.ui.model.capture_running = false;
-                self.ui.model.active_backend = None;
-                self.push_log("capture stopped");
-            }
+            UiCommand::StartCapture => self.start_capture(),
+            UiCommand::StopCapture => self.stop_capture(),
             UiCommand::LoadModel => {
                 let settings = (&self.ui.model.config.vision_algorithms.yolo26_detection).into();
                 let providers = self
@@ -144,22 +285,7 @@ impl DesktopApp {
                     .execution_providers
                     .join(", ");
                 self.push_log(format!("loading model with EP order: [{providers}]"));
-                match self.inference.initialize(settings) {
-                    Ok(state) => {
-                        self.sync_inference_ui_state();
-                        self.ui.model.provider_state = state;
-                        self.ui.model.last_error = None;
-                        self.push_log(format!(
-                            "inference backend initialized: {}",
-                            self.inference.backend_name()
-                        ));
-                        self.log_inference_diagnostics();
-                    }
-                    Err(err) => {
-                        self.ui.model.last_error = Some(err.to_string());
-                        self.sync_inference_ui_state();
-                    }
-                }
+                self.worker.load_model(settings);
             }
             UiCommand::SaveSettings => {
                 let mut config_to_save = self.ui.model.config.clone();
@@ -174,18 +300,199 @@ impl DesktopApp {
                     }
                 }
             }
+            UiCommand::LoadHsvSettings => {
+                let path = self.hsv_settings_path();
+                match load_hsv_picker_settings(&path) {
+                    Ok(mut picker) => {
+                        picker.clamp_min_max();
+                        picker.apply_to(&mut self.ui.model.config.vision_algorithms.hsv_tracking);
+                        self.ui.model.last_error = None;
+                        self.push_log(format!("HSV settings loaded from {}", path.display()));
+                    }
+                    Err(err) => self.ui.model.last_error = Some(err.to_string()),
+                }
+            }
+            UiCommand::SaveHsvSettings => {
+                let path = self.hsv_settings_path();
+                let mut picker = HsvPickerSettings::from_tracking(
+                    &self.ui.model.config.vision_algorithms.hsv_tracking,
+                );
+                picker.clamp_min_max();
+                match save_hsv_picker_settings(&path, &picker) {
+                    Ok(()) => {
+                        self.ui.model.last_error = None;
+                        self.push_log(format!("HSV settings saved to {}", path.display()));
+                    }
+                    Err(err) => self.ui.model.last_error = Some(err.to_string()),
+                }
+            }
         }
     }
 
+    fn hsv_settings_path(&self) -> PathBuf {
+        hsv_settings_path_for_config(&self.config_path)
+    }
+
+    fn start_capture(&mut self) {
+        if self.capture_session.is_some() {
+            return;
+        }
+        let Some(target) = self
+            .ui
+            .model
+            .targets
+            .get(self.ui.model.selected_target)
+            .cloned()
+        else {
+            self.ui.model.last_error = Some("no capture target selected".to_owned());
+            return;
+        };
+        self.ui.model.backend_preference = CaptureBackendPreference::DxgiDuplication;
+        let bindings = self.ui.model.config.runtime_bindings(
+            self.ui.model.preview_enabled,
+            self.ui.model.backend_preference,
+        );
+        match self.capture_backend.start(&target, bindings.capture) {
+            Ok(session) => {
+                let backend = session.backend_kind();
+                self.capture_session = Some(session);
+                self.ui.model.capture_running = true;
+                self.ui.model.active_backend = Some(backend);
+                self.ui.model.last_error = None;
+                self.session_fingerprint = self.current_fingerprint();
+                self.last_preview_enabled = false;
+                self.last_analysis_enabled = false;
+                self.push_log(format!(
+                    "capture started on {} via {} @ {} FPS (adapter={:?}, output={:?})",
+                    target.name,
+                    backend_kind_label(backend),
+                    self.ui.model.config.performance.target_fps,
+                    target.adapter_index,
+                    target.output_index
+                ));
+            }
+            Err(err) => self.ui.model.last_error = Some(err.to_string()),
+        }
+    }
+
+    fn stop_capture(&mut self) {
+        if let Some(session) = self.capture_session.take() {
+            session.set_preview_enabled(false);
+            session.set_analysis_enabled(false);
+            let _ = session.stop();
+        }
+        self.ui.model.capture_running = false;
+        self.ui.model.active_backend = None;
+        self.session_fingerprint = None;
+        self.last_preview_enabled = false;
+        self.last_analysis_enabled = false;
+        self.ui.model.preview_frame = None;
+        self.ui.model.preview_frame_version =
+            self.ui.model.preview_frame_version.wrapping_add(1);
+        self.push_log("capture stopped");
+    }
+
+    fn maybe_restart_capture_for_option_changes(&mut self) {
+        if self.capture_session.is_none() {
+            return;
+        }
+        let Some(current) = self.current_fingerprint() else {
+            return;
+        };
+        let Some(previous) = self.session_fingerprint.as_ref() else {
+            return;
+        };
+        if current == *previous {
+            return;
+        }
+        self.push_log("capture options changed — restarting DXGI session…");
+        self.stop_capture();
+        self.start_capture();
+    }
+
+    fn sync_session_gates(&mut self) {
+        let want_preview = self.ui.monitor_is_open() && self.ui.model.preview_enabled;
+        let yolo_on = self.ui.model.config.vision_algorithms.yolo26_detection.enabled;
+        let hsv_on = self.ui.model.config.vision_algorithms.hsv_tracking.enabled;
+        let want_analysis = hsv_on || yolo_on;
+
+        if yolo_on {
+            self.maybe_autoload_yolo_model();
+        } else {
+            self.yolo_autoload_done = false;
+        }
+
+        if let Some(session) = self.capture_session.as_ref() {
+            if want_preview != self.last_preview_enabled {
+                session.set_preview_enabled(want_preview);
+                self.last_preview_enabled = want_preview;
+                if !want_preview && self.ui.model.preview_frame.is_some() {
+                    self.ui.model.preview_frame = None;
+                    self.ui.model.preview_frame_version =
+                        self.ui.model.preview_frame_version.wrapping_add(1);
+                }
+            }
+            if want_analysis != self.last_analysis_enabled {
+                session.set_analysis_enabled(want_analysis);
+                self.last_analysis_enabled = want_analysis;
+            }
+        }
+    }
+
+    fn maybe_autoload_yolo_model(&mut self) {
+        if self.yolo_autoload_done {
+            return;
+        }
+        if !matches!(
+            self.ui.model.provider_state,
+            ProviderState::Uninitialized | ProviderState::Failed(_)
+        ) {
+            self.yolo_autoload_done = true;
+            return;
+        }
+        let model_path = self
+            .ui
+            .model
+            .config
+            .vision_algorithms
+            .yolo26_detection
+            .onnx_model_path
+            .clone();
+        if !model_path.exists() {
+            self.ui.model.last_error = Some(format!(
+                "YOLO model not found: {} — place yolo26n.onnx in models/ (see models/README.md)",
+                model_path.display()
+            ));
+            self.yolo_autoload_done = true;
+            return;
+        }
+        self.yolo_autoload_done = true;
+        let settings = (&self.ui.model.config.vision_algorithms.yolo26_detection).into();
+        self.push_log("YOLO enabled — loading model…");
+        self.worker.load_model(settings);
+    }
+
     fn pump_capture(&mut self) {
+        self.maybe_restart_capture_for_option_changes();
+        self.drain_worker_events();
+        self.sync_session_gates();
+
         let mut disconnected = false;
-        let mut pending_packets = Vec::new();
+        let mut latest_packet_size = None;
+        let mut skipped = 0u64;
+        let mut captured = 0u64;
+
         if let Some(session) = self.capture_session.as_ref() {
             self.ui.model.active_backend = Some(session.backend_kind());
+
+            // Drain GPU frame channel for FPS accounting only — do not submit D3D11 to worker.
             loop {
                 match session.try_recv() {
                     Ok(Some(packet)) => {
-                        pending_packets.push(packet);
+                        captured += 1;
+                        if latest_packet_size.replace(packet.frame.size()).is_some() {
+                            skipped += 1;
+                        }
                     }
                     Ok(None) => break,
                     Err(err) => {
@@ -196,70 +503,128 @@ impl DesktopApp {
                 }
             }
 
+            // Monitor preview: CPU ColorImage from capture-thread channel.
+            loop {
+                match session.try_recv_preview() {
+                    Ok(Some(preview)) => {
+                        self.ui.model.capture_frame_size = Some(preview.capture_size);
+                        self.ui.model.preview_scale = preview.scale;
+                        self.ui.model.preview_frame =
+                            Some(cpu_buffer_to_color_image(&preview.buffer));
+                        self.ui.model.preview_frame_version =
+                            self.ui.model.preview_frame_version.wrapping_add(1);
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+
+            // Analysis ROI: CPU-only submit to vision worker.
+            let mut latest_analysis = None;
+            loop {
+                match session.try_recv_analysis() {
+                    Ok(Some(frame)) => {
+                        let _ = latest_analysis.replace(frame);
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            if let Some(analysis) = latest_analysis {
+                self.ui.model.capture_frame_size = Some(analysis.capture_size);
+                let bindings = self.ui.model.config.runtime_bindings(
+                    self.ui.model.preview_enabled,
+                    self.ui.model.backend_preference,
+                );
+                let mut settings = FramePipelineSettings::from(&bindings);
+                settings.want_preview_buffer = false;
+                settings.preview_enabled = false;
+                if !self.worker.try_submit(analysis, settings) {
+                    self.telemetry.on_drop(1);
+                }
+            }
+
             let stats = session.stats();
             self.telemetry.ingest_capture_stats(&stats);
         }
 
-        for packet in pending_packets {
-            let started_at = Instant::now();
-            if let Err(err) = self.process_packet(packet) {
-                self.ui.model.last_error = Some(err.to_string());
-                self.push_log(format!("frame processing failed: {err}"));
-            }
-            let processing_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-            self.telemetry
-                .on_frame_with_processing(Some(processing_ms));
+        if skipped > 0 {
+            self.telemetry.on_drop(skipped);
+        }
+        for _ in 0..captured.saturating_sub(skipped) {
+            self.telemetry.on_frame();
+        }
+        if let Some(size) = latest_packet_size {
+            self.ui.model.capture_frame_size = Some(size);
         }
 
         if disconnected {
             self.capture_session = None;
             self.ui.model.capture_running = false;
             self.ui.model.active_backend = None;
+            self.session_fingerprint = None;
+            self.last_preview_enabled = false;
+            self.last_analysis_enabled = false;
         }
 
         self.ui.model.performance = self.telemetry.snapshot();
-        self.sync_inference_ui_state();
     }
 
-    fn process_packet(&mut self, packet: capture_core::CapturePacket) -> Result<()> {
-        let bindings = self.ui.model.config.runtime_bindings(
-            self.ui.model.preview_enabled,
-            self.ui.model.backend_preference,
-        );
-        let settings = FramePipelineSettings::from(&bindings);
-        let report = self
-            .pipeline
-            .process(&packet.frame, &settings, Some(&mut self.inference))?;
-
-        self.ui.model.hsv_hit_count = report.hsv_hit_count();
-        self.ui.model.yolo_detection_count = report.yolo_detection_count();
-        if self.ui.model.preview_enabled {
-            self.ui.model.roi_preview = report
-                .preview_buffer
-                .as_ref()
-                .map(cpu_buffer_to_color_image);
-            self.ui.model.roi_preview_version = self.ui.model.roi_preview_version.wrapping_add(1);
-        } else if self.ui.model.roi_preview.is_some() {
-            self.ui.model.roi_preview = None;
-            self.ui.model.roi_preview_version = self.ui.model.roi_preview_version.wrapping_add(1);
-        }
-
-        Ok(())
-    }
-
-    fn sync_inference_ui_state(&mut self) {
-        self.ui.model.provider_state = self.inference.provider_state();
-        self.ui.model.inference_diagnostics = self.inference.diagnostics();
-    }
-
-    fn log_inference_diagnostics(&mut self) {
-        let diagnostics = self.ui.model.inference_diagnostics.clone();
-        self.push_log(inference_summary(&diagnostics));
-        if let Some(reason) = diagnostics.fallback_reason {
-            self.push_log(format!("provider fallback reason: {reason}"));
-        }
-        for note in diagnostics.validation_notes {
-            self.push_log(format!("model validation: {note}"));
+    fn drain_worker_events(&mut self) {
+        for event in self.worker.poll_events() {
+            match event {
+                WorkerEvent::Frame {
+                    hsv,
+                    yolo_detections,
+                    capture_roi,
+                    capture_size,
+                    model_input,
+                    processing_ms,
+                    provider_state,
+                    diagnostics,
+                } => {
+                    self.ui.model.hsv = hsv;
+                    self.ui.model.yolo_detections = yolo_detections;
+                    self.ui.model.capture_roi = Some(capture_roi);
+                    self.ui.model.capture_frame_size = Some(capture_size);
+                    self.ui.model.model_input_size = Some(model_input);
+                    self.ui.model.provider_state = provider_state;
+                    self.ui.model.inference_diagnostics = diagnostics;
+                    self.telemetry.set_processing_ms(processing_ms);
+                }
+                WorkerEvent::ModelReady {
+                    state,
+                    diagnostics,
+                    summary,
+                } => {
+                    self.ui.model.provider_state = state;
+                    self.ui.model.inference_diagnostics = diagnostics.clone();
+                    self.ui.model.last_error = None;
+                    self.push_log(format!(
+                        "inference backend initialized: {}",
+                        provider_label_short(&self.ui.model.provider_state)
+                    ));
+                    self.push_log(summary);
+                    if let Some(reason) = diagnostics.fallback_reason {
+                        self.push_log(format!("provider fallback reason: {reason}"));
+                    }
+                    for note in diagnostics.validation_notes {
+                        self.push_log(format!("model validation: {note}"));
+                    }
+                }
+                WorkerEvent::Failed(message) => {
+                    if self.ui.model.config.vision_algorithms.yolo26_detection.enabled
+                        && matches!(
+                            self.ui.model.provider_state,
+                            ProviderState::Uninitialized | ProviderState::Failed(_)
+                        )
+                    {
+                        self.yolo_autoload_done = false;
+                    }
+                    self.ui.model.last_error = Some(message.clone());
+                    self.push_log(format!("frame processing failed: {message}"));
+                }
+            }
         }
     }
 
@@ -278,6 +643,11 @@ impl eframe::App for DesktopApp {
         for command in commands {
             self.handle_command(command);
         }
+        // Keep gates in sync after UI toggles Monitor open/close this frame.
+        self.sync_session_gates();
+        if self.ui.model.capture_running {
+            ctx.request_repaint_after(CAPTURE_REPAINT_INTERVAL);
+        }
     }
 }
 
@@ -289,7 +659,6 @@ fn discover_repo_root(start: PathBuf) -> PathBuf {
             return current.to_path_buf();
         }
     }
-
     Path::new(".").to_path_buf()
 }
 
@@ -314,41 +683,65 @@ fn relativize_model_paths(config: &mut AppConfig, repo_root: &Path) {
 }
 
 fn cpu_buffer_to_color_image(buffer: &CpuBuffer) -> egui::ColorImage {
-    let mut rgba = vec![0u8; (buffer.width * buffer.height * 4) as usize];
-    for y in 0..buffer.height as usize {
-        for x in 0..buffer.width as usize {
-            let src = y * buffer.stride as usize + x * 4;
-            let dst = (y * buffer.width as usize + x) * 4;
-            match buffer.pixel_format {
-                PixelFormat::Bgra8Unorm => {
+    let width = buffer.width as usize;
+    let height = buffer.height as usize;
+    let mut rgba = vec![0u8; width * height * 4];
+    match buffer.pixel_format {
+        PixelFormat::Bgra8Unorm => {
+            for y in 0..height {
+                let src_row = y * buffer.stride as usize;
+                let dst_row = y * width * 4;
+                for x in 0..width {
+                    let src = src_row + x * 4;
+                    let dst = dst_row + x * 4;
                     rgba[dst] = buffer.data[src + 2];
                     rgba[dst + 1] = buffer.data[src + 1];
                     rgba[dst + 2] = buffer.data[src];
                     rgba[dst + 3] = buffer.data[src + 3];
                 }
-                PixelFormat::Rgba8Unorm => {
-                    rgba[dst] = buffer.data[src];
-                    rgba[dst + 1] = buffer.data[src + 1];
-                    rgba[dst + 2] = buffer.data[src + 2];
-                    rgba[dst + 3] = buffer.data[src + 3];
+            }
+        }
+        PixelFormat::Rgba8Unorm => {
+            for y in 0..height {
+                let src_row = y * buffer.stride as usize;
+                let dst_row = y * width * 4;
+                for x in 0..width {
+                    let src = src_row + x * 4;
+                    let dst = dst_row + x * 4;
+                    rgba[dst..dst + 4].copy_from_slice(&buffer.data[src..src + 4]);
                 }
             }
         }
     }
+    egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba)
+}
 
-    egui::ColorImage::from_rgba_unmultiplied([buffer.width as usize, buffer.height as usize], &rgba)
+fn provider_label_short(state: &ProviderState) -> String {
+    match state {
+        ProviderState::Uninitialized => "uninitialized".to_owned(),
+        ProviderState::DirectMl {
+            device_id,
+            cpu_fallback,
+        } => {
+            if *cpu_fallback {
+                format!("DirectML#{device_id}+CPU")
+            } else {
+                format!("DirectML#{device_id}")
+            }
+        }
+        ProviderState::OpenVino { device_type } => format!("OpenVINO/{device_type}"),
+        ProviderState::CpuFallback => "CPU".to_owned(),
+        ProviderState::Failed(_) => "failed".to_owned(),
+    }
 }
 
 fn inference_summary(diagnostics: &InferenceDiagnostics) -> String {
-    let graph = diagnostics
-        .model_metadata
-        .graph_name
-        .as_deref()
-        .unwrap_or("unnamed graph");
-    format!(
-        "model ready: {graph}; inputs={}, outputs={}, classes={}",
-        diagnostics.inputs.len(),
-        diagnostics.outputs.len(),
-        diagnostics.class_count
-    )
+    let mut parts = vec![format!("classes={}", diagnostics.class_count)];
+    if let Some(shape) = &diagnostics.last_output_shape {
+        parts.push(format!("output={shape:?}"));
+    }
+    if let Some(graph) = &diagnostics.model_metadata.graph_name {
+        parts.push(format!("graph={graph}"));
+    }
+    parts.join(", ")
 }

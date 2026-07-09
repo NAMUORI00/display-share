@@ -9,6 +9,7 @@ anyhow.workspace = true
 capture-core = { path = "../../crates/capture-core" }
 capture-windows = { path = "../../crates/capture-windows" }
 config = { path = "../../crates/config" }
+crossbeam-channel.workspace = true
 eframe.workspace = true
 inference-dml = { path = "../../crates/inference-dml" }
 pipeline = { path = "../../crates/pipeline" }
