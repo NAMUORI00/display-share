@@ -1,4 +1,4 @@
-# C_capture
+# display-share
 
 Windows 우선 **화면 캡처 + 비전 파이프라인** 프로젝트입니다.  
 Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI/WGC), HSV 추적, YOLO26 ONNX 추론, egui 데스크톱 셸을 제공합니다.
@@ -8,7 +8,10 @@ Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI/WG
 | 앱 바이너리 | `display-share` (`capture-first/apps/smartscreencapture`) |
 | 플랫폼 | Windows 10/11 (D3D11, DirectML, 선택적 OpenVINO) |
 | 라이선스 | [MIT](./LICENSE) (앱 소스) |
-| 상세 문서 | **[`wiki` 브랜치](../../tree/wiki)** (위키 페이지) |
+| 문서 사이트 | **[GitHub Pages](https://NAMUORI00.github.io/display-share/)** (`wiki` 브랜치) |
+| 문서 소스 | [`wiki` 브랜치](../../tree/wiki) |
+
+> 이전 저장소 이름: `C_capture` (이력·로컬 폴더명에 남을 수 있음)
 
 ## 빠른 시작
 
@@ -24,8 +27,8 @@ Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI/WG
 
 ```powershell
 # 저장소 루트에서
-git clone https://github.com/NAMUORI00/C_capture.git
-cd C_capture
+git clone https://github.com/NAMUORI00/display-share.git
+cd display-share
 
 # (선택) YOLO26n ONNX 다운로드
 .\scripts\download_yolo26n.ps1
@@ -38,7 +41,7 @@ cargo run --manifest-path capture-first/Cargo.toml -p display-share --release
 ```
 
 설정은 저장소 루트의 `config/config.json`, 클래스 라벨은 `models/coco_classes.txt`를 사용합니다.  
-재현 절차·아키텍처·라이선스 세부 사항은 위키를 보세요.
+재현 절차·아키텍처·라이선스 세부 사항은 [문서 사이트](https://NAMUORI00.github.io/display-share/)를 보세요.
 
 ### 테스트
 
@@ -49,7 +52,7 @@ cargo test --manifest-path capture-first/Cargo.toml --workspace
 ## 저장소 구조
 
 ```text
-C_capture/
+display-share/
 ├── capture-first/          # Rust workspace (앱 + crates)
 │   ├── apps/smartscreencapture/   # display-share 바이너리
 │   └── crates/             # capture-core, capture-windows, inference-dml, …
@@ -61,34 +64,34 @@ C_capture/
 └── README.md
 ```
 
-## 문서 (wiki 브랜치)
+## 문서
 
-긴 설명·재현 가이드·라이선스 메모·아키텍처는 **소스 트리와 분리된 `wiki` 브랜치**에 둡니다.
+긴 설명은 **소스와 분리된 `wiki` 브랜치**에 두고, GitHub Pages로 배포합니다.
 
-| 페이지 | 설명 |
-|--------|------|
-| [Home](../../blob/wiki/Home.md) | 위키 홈 · 목차 |
-| [시작하기](../../blob/wiki/시작하기.md) | 설치 · 빌드 · 실행 |
-| [재현-가이드](../../blob/wiki/재현-가이드.md) | 재현 환경 · 검증 체크리스트 |
-| [라이선스](../../blob/wiki/라이선스.md) | MIT 및 서드파티(모델·런타임) |
-| [아키텍처](../../blob/wiki/아키텍처.md) | 크레이트 경계 · 파이프라인 |
-| [설정](../../blob/wiki/설정.md) | `config.json` 필드 설명 |
-| [모델-가이드](../../blob/wiki/모델-가이드.md) | YOLO26 ONNX 준비 |
-| [개발-현황](../../blob/wiki/개발-현황.md) | 마이그레이션 트랙 요약 |
+| 문서 | 링크 |
+|------|------|
+| 홈 | https://NAMUORI00.github.io/display-share/ |
+| 시작하기 | https://NAMUORI00.github.io/display-share/시작하기.html |
+| 재현 가이드 | https://NAMUORI00.github.io/display-share/재현-가이드.html |
+| 라이선스 | https://NAMUORI00.github.io/display-share/라이선스.html |
+| 아키텍처 | https://NAMUORI00.github.io/display-share/아키텍처.html |
+| 설정 | https://NAMUORI00.github.io/display-share/설정.html |
+| 모델 가이드 | https://NAMUORI00.github.io/display-share/모델-가이드.html |
+| 개발 현황 | https://NAMUORI00.github.io/display-share/개발-현황.html |
 
-로컬에서 wiki만 보려면:
+로컬에서 wiki 소스만 보려면:
 
 ```powershell
 git fetch origin wiki
 git switch wiki
 # 또는
-git show wiki:Home.md
+git show wiki:index.md
 ```
 
 ## 라이선스
 
 - **앱 소스 코드**: [MIT License](./LICENSE)
-- **YOLO26 / Ultralytics 모델 자산**: 별도 조건(AGPL-3.0 또는 상업 라이선스 등)이 적용될 수 있습니다. 배포 전 [모델 가이드](./models/README.md)와 위키 [라이선스](../../blob/wiki/라이선스.md)를 확인하세요.
+- **YOLO26 / Ultralytics 모델 자산**: 별도 조건(AGPL-3.0 또는 상업 라이선스 등)이 적용될 수 있습니다. 배포 전 [모델 가이드](./models/README.md)와 [라이선스 문서](https://NAMUORI00.github.io/display-share/라이선스.html)를 확인하세요.
 - **ONNX Runtime / DirectML / OpenVINO**: 각 벤더 배포 라이선스를 따릅니다.
 
 ## 관련 문서 (main 브랜치)
