@@ -7,6 +7,7 @@ use std::sync::Arc;
 use capture_core::{
     CpuBuffer, GpuTexture, GraphicsBackend, PixelFormat, RectI, Size2D, VisionError,
 };
+use parking_lot::Mutex;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device,
@@ -15,6 +16,18 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
 };
+use windows::core::Interface;
+
+/// Reused staging textures to avoid E_OUTOFMEMORY (0x8007000E) from per-frame CreateTexture2D.
+static STAGING_CACHE: Mutex<Vec<CachedStaging>> = Mutex::new(Vec::new());
+
+struct CachedStaging {
+    device: ID3D11Device,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
+    texture: ID3D11Texture2D,
+}
 
 #[derive(Clone)]
 pub struct D3d11TextureHandle {
@@ -80,14 +93,14 @@ impl D3d11TextureHandle {
             Usage: D3D11_USAGE_DEFAULT,
             BindFlags: src_desc.BindFlags,
             CPUAccessFlags: 0,
-            MiscFlags: src_desc.MiscFlags,
+            MiscFlags: 0,
         };
 
         let mut texture = None;
         unsafe {
             device
                 .CreateTexture2D(&desc, None, Some(&mut texture))
-                .map_err(|err| VisionError::Other(err.to_string()))?;
+                .map_err(map_oom)?;
         }
         let texture = texture.ok_or_else(|| {
             VisionError::Other("CreateTexture2D returned null texture".to_owned())
@@ -129,38 +142,19 @@ impl D3d11TextureHandle {
             .immediate_context()
             .map_err(|err| VisionError::Other(err.to_string()))?;
         let src_desc = self.desc();
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: src_desc.Width,
-            Height: src_desc.Height,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: src_desc.Format,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_STAGING,
-            BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-            MiscFlags: 0,
-        };
+        let staging = acquire_staging(
+            &device,
+            src_desc.Width,
+            src_desc.Height,
+            src_desc.Format,
+        )?;
 
-        let mut texture = None;
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        unsafe {
-            device
-                .CreateTexture2D(&desc, None, Some(&mut texture))
-                .map_err(|err| VisionError::Other(err.to_string()))?;
-        }
-        let staging = texture.ok_or_else(|| {
-            VisionError::Other("CreateTexture2D returned null staging texture".to_owned())
-        })?;
-
         unsafe {
             context.CopyResource(&staging, &self.texture);
             context
                 .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                .map_err(|err| VisionError::Other(err.to_string()))?;
+                .map_err(map_oom)?;
         }
 
         let mut buffer = CpuBuffer::empty(self.size, self.pixel_format);
@@ -182,6 +176,7 @@ impl D3d11TextureHandle {
         unsafe {
             context.Unmap(&staging, 0);
         }
+        release_staging(device, src_desc.Width, src_desc.Height, src_desc.Format, staging);
 
         Ok(buffer)
     }
@@ -201,6 +196,91 @@ impl D3d11TextureHandle {
     fn immediate_context(&self) -> windows::core::Result<ID3D11DeviceContext> {
         let device = self.device()?;
         unsafe { device.GetImmediateContext() }
+    }
+}
+
+fn acquire_staging(
+    device: &ID3D11Device,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
+) -> Result<ID3D11Texture2D, VisionError> {
+    {
+        let mut cache = STAGING_CACHE.lock();
+        if let Some(index) = cache.iter().position(|entry| {
+            entry.width == width
+                && entry.height == height
+                && entry.format == format
+                && same_device(&entry.device, device)
+        }) {
+            return Ok(cache.swap_remove(index).texture);
+        }
+    }
+
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: width,
+        Height: height,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: format,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_STAGING,
+        BindFlags: 0,
+        CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+        MiscFlags: 0,
+    };
+    let mut texture = None;
+    unsafe {
+        device
+            .CreateTexture2D(&desc, None, Some(&mut texture))
+            .map_err(map_oom)?;
+    }
+    texture.ok_or_else(|| {
+        VisionError::Other("CreateTexture2D returned null staging texture".to_owned())
+    })
+}
+
+fn release_staging(
+    device: ID3D11Device,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
+    texture: ID3D11Texture2D,
+) {
+    let mut cache = STAGING_CACHE.lock();
+    // Keep a small pool per size to avoid unbounded growth.
+    let same_size = cache
+        .iter()
+        .filter(|e| e.width == width && e.height == height && e.format == format)
+        .count();
+    if same_size < 2 {
+        cache.push(CachedStaging {
+            device,
+            width,
+            height,
+            format,
+            texture,
+        });
+    }
+}
+
+fn same_device(a: &ID3D11Device, b: &ID3D11Device) -> bool {
+    // COM identity: same underlying object.
+    a.as_raw() == b.as_raw()
+}
+
+fn map_oom(err: windows::core::Error) -> VisionError {
+    let message = err.to_string();
+    if message.contains("0x8007000E") || message.contains("E_OUTOFMEMORY") {
+        VisionError::Other(format!(
+            "GPU/system out of memory during D3D11 texture op (0x8007000E). \
+             Close Monitor if open, lower target FPS, or reduce frame buffer. Detail: {message}"
+        ))
+    } else {
+        VisionError::Other(message)
     }
 }
 

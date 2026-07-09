@@ -62,6 +62,11 @@ impl TelemetryHub {
         }
     }
 
+    /// Update processing latency without counting another capture frame.
+    pub fn set_processing_ms(&self, processing_time_ms: f64) {
+        self.inner.lock().snapshot.processing_time_ms = processing_time_ms;
+    }
+
     pub fn on_drop(&self, count: u64) {
         let mut state = self.inner.lock();
         state.snapshot.dropped_frames += count;

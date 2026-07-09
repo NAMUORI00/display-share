@@ -1,26 +1,25 @@
-//! Windows capture backends (WGC + DXGI duplication).
+//! Windows capture — DXGI Desktop Duplication only (OBS Display Capture axis).
 //! Shared D3D11 device factory keeps crop/preprocess on the same adapter when possible.
 
 mod device;
 mod dxgi;
 mod enumerate;
 mod resolve;
+#[allow(dead_code)]
 mod wgc;
 
 use capture_core::{
-    CaptureBackend, CaptureBackendKind, CaptureError, CaptureOptions, CaptureSession, CaptureTarget,
+    CaptureBackend, CaptureError, CaptureOptions, CaptureSession, CaptureTarget,
 };
 
 use crate::dxgi::DxgiDuplicationBackend;
 use crate::enumerate::enumerate_wgc_monitors;
 use crate::resolve::resolve_backend;
-use crate::wgc::WgcCaptureBackend;
 
 pub use crate::device::SharedD3d11Device;
 
 #[derive(Default)]
 pub struct WindowsCaptureBackend {
-    wgc: WgcCaptureBackend,
     dxgi: DxgiDuplicationBackend,
 }
 
@@ -33,11 +32,9 @@ impl WindowsCaptureBackend {
 
 impl CaptureBackend for WindowsCaptureBackend {
     fn enumerate_targets(&self) -> Result<Vec<CaptureTarget>, CaptureError> {
-        let wgc_monitors = enumerate_wgc_monitors()?;
-        match self.dxgi.enumerate_targets_with_wgc(&wgc_monitors) {
-            Ok(targets) if !targets.is_empty() => Ok(targets),
-            Ok(_) | Err(_) => self.wgc.enumerate_targets_with_wgc(&wgc_monitors),
-        }
+        // DXGI outputs are the source of truth. WGC monitor metadata is optional enrichment.
+        let monitors = enumerate_wgc_monitors().unwrap_or_default();
+        self.dxgi.enumerate_targets_with_wgc(&monitors)
     }
 
     fn start(
@@ -45,17 +42,9 @@ impl CaptureBackend for WindowsCaptureBackend {
         target: &CaptureTarget,
         options: CaptureOptions,
     ) -> Result<Box<dyn CaptureSession>, CaptureError> {
-        // Session.backend_kind() is the source of truth — facade does not report a fixed kind.
-        match resolve_backend(target, options.backend_preference)? {
-            CaptureBackendKind::WindowsGraphicsCapture => self.wgc.start(target, options),
-            CaptureBackendKind::DxgiDuplication => self.dxgi.start(target, options),
-            CaptureBackendKind::ObsAdapter => Err(CaptureError::BackendUnavailable(
-                "OBS adapter backend is not implemented yet".to_owned(),
-            )),
-            other => Err(CaptureError::BackendUnavailable(format!(
-                "capture backend {other:?} is not implemented"
-            ))),
-        }
+        // DXGI-only path — no WGC fallback. Preference is ignored for API selection.
+        let _ = resolve_backend(target, options.backend_preference)?;
+        self.dxgi.start(target, options)
     }
 
     fn supports_zero_copy(&self) -> bool {
@@ -90,25 +79,34 @@ mod tests {
     }
 
     #[test]
-    fn auto_prefers_target_default_backend() {
-        let target = make_target(vec![
-            CaptureBackendKind::WindowsGraphicsCapture,
-            CaptureBackendKind::DxgiDuplication,
-        ]);
+    fn auto_resolves_to_dxgi_only() {
+        let target = make_target(vec![CaptureBackendKind::DxgiDuplication]);
 
         let backend = resolve_backend(&target, CaptureBackendPreference::Auto)
             .expect("backend should resolve");
 
-        assert_eq!(backend, CaptureBackendKind::WindowsGraphicsCapture);
+        assert_eq!(backend, CaptureBackendKind::DxgiDuplication);
     }
 
     #[test]
-    fn forced_backend_fails_when_unavailable() {
+    fn prefer_wgc_still_resolves_to_dxgi() {
         let target = make_target(vec![CaptureBackendKind::DxgiDuplication]);
 
-        let error = resolve_backend(&target, CaptureBackendPreference::WindowsGraphicsCapture)
-            .expect_err("backend should fail");
+        let backend =
+            resolve_backend(&target, CaptureBackendPreference::WindowsGraphicsCapture)
+                .expect("DXGI-only path ignores WGC preference");
 
-        assert!(error.to_string().contains("not available"));
+        assert_eq!(backend, CaptureBackendKind::DxgiDuplication);
+    }
+
+    #[test]
+    fn missing_dxgi_fails_clearly() {
+        let target = make_target(vec![CaptureBackendKind::WindowsGraphicsCapture]);
+
+        let error = resolve_backend(&target, CaptureBackendPreference::Auto).expect_err(
+            "DXGI must be available",
+        );
+
+        assert!(error.to_string().contains("DXGI"));
     }
 }

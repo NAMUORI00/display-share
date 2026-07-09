@@ -303,6 +303,25 @@ impl CapturePacket {
     }
 }
 
+/// Monitor preview produced on the capture thread (CPU only; no cross-thread D3D11).
+#[derive(Debug, Clone)]
+pub struct PreviewFrame {
+    pub frame_number: u64,
+    pub buffer: CpuBuffer,
+    /// Uniform scale: preview pixels / capture pixels.
+    pub scale: f32,
+    pub capture_size: Size2D,
+}
+
+/// ROI CPU buffer for HSV/YOLO — produced on the capture thread.
+#[derive(Debug, Clone)]
+pub struct AnalysisFrame {
+    pub frame_number: u64,
+    pub capture_size: Size2D,
+    pub capture_roi: CaptureRoi,
+    pub roi_buffer: CpuBuffer,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CaptureStats {
     pub total_frames: u64,
@@ -334,10 +353,20 @@ pub struct HsvSettings {
 }
 
 /// Compact HSV mask summary — not per-pixel YOLO-style boxes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct HsvDetectedObject {
+    /// Bounding box in full capture-frame coordinates.
+    pub rect: RectI,
+    pub area: f32,
+}
+
+/// Compact HSV mask summary — not per-pixel YOLO-style boxes.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct HsvMaskStats {
     pub hit_count: usize,
     pub bbox_union: Option<RectI>,
+    /// Contour-based detections (frame coordinates).
+    pub objects: Vec<HsvDetectedObject>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -512,6 +541,18 @@ pub trait CaptureSession: Send + Sync {
     fn stats(&self) -> CaptureStats;
     /// Source of truth for the active backend (facade must not lie).
     fn backend_kind(&self) -> CaptureBackendKind;
+
+    /// Gate Monitor preview readback on the capture thread (~20 FPS when enabled).
+    fn set_preview_enabled(&self, _enabled: bool) {}
+    fn try_recv_preview(&self) -> Result<Option<PreviewFrame>, CaptureError> {
+        Ok(None)
+    }
+
+    /// Gate ROI CPU production for HSV/YOLO (capture-thread readback only).
+    fn set_analysis_enabled(&self, _enabled: bool) {}
+    fn try_recv_analysis(&self) -> Result<Option<AnalysisFrame>, CaptureError> {
+        Ok(None)
+    }
 }
 
 pub trait CaptureBackend: Send + Sync {
