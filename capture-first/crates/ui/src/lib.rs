@@ -20,9 +20,16 @@ const PANEL_BG: Color32 = Color32::from_rgb(248, 250, 252);
 const SURFACE: Color32 = Color32::from_rgb(255, 255, 255);
 const BORDER: Color32 = Color32::from_rgb(226, 232, 240);
 const TEXT_MUTED: Color32 = Color32::from_rgb(100, 116, 139);
-const LEFT_RAIL_W: f32 = 220.0;
-const RIGHT_RAIL_W: f32 = 240.0;
-const LOG_DRAWER_H: f32 = 180.0;
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(15, 23, 42);
+const LOG_DRAWER_H: f32 = 120.0;
+const LOG_DRAWER_COLLAPSED: f32 = 26.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HsvPreviewMaskMode {
+    #[default]
+    RawMask,
+    MorphMask,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiCommand {
@@ -62,6 +69,16 @@ pub struct UiModel {
     pub yolo_detections: Vec<DetectionResult>,
     pub inference_diagnostics: InferenceDiagnostics,
     pub config_path: Option<PathBuf>,
+    /// HSV tuning preview images (analysis-buffer resolution).
+    pub hsv_tune_source: Option<ColorImage>,
+    pub hsv_tune_raw: Option<ColorImage>,
+    pub hsv_tune_morph: Option<ColorImage>,
+    pub hsv_tune_overlay: Option<ColorImage>,
+    pub hsv_tune_version: u64,
+    pub hsv_coverage_pct: f32,
+    pub hsv_mask_overlay_enabled: bool,
+    pub hsv_tune_dirty: bool,
+    pub hsv_preview_mask_mode: HsvPreviewMaskMode,
 }
 
 impl Default for UiModel {
@@ -72,7 +89,7 @@ impl Default for UiModel {
             capture_running: false,
             performance: PerformanceSnapshot::default(),
             provider_state: ProviderState::Uninitialized,
-            backend_label: "Windows capture selector".to_owned(),
+            backend_label: "Display".to_owned(),
             backend_preference: CaptureBackendPreference::DxgiDuplication,
             active_backend: None,
             last_error: None,
@@ -89,6 +106,15 @@ impl Default for UiModel {
             yolo_detections: Vec::new(),
             inference_diagnostics: InferenceDiagnostics::default(),
             config_path: None,
+            hsv_tune_source: None,
+            hsv_tune_raw: None,
+            hsv_tune_morph: None,
+            hsv_tune_overlay: None,
+            hsv_tune_version: 0,
+            hsv_coverage_pct: 0.0,
+            hsv_mask_overlay_enabled: false,
+            hsv_tune_dirty: false,
+            hsv_preview_mask_mode: HsvPreviewMaskMode::RawMask,
         }
     }
 }
@@ -113,9 +139,16 @@ pub struct SmartCaptureUi {
     pub model: UiModel,
     preview_texture: Option<TextureHandle>,
     last_preview_version: u64,
+    hsv_tune_source_tex: Option<TextureHandle>,
+    hsv_tune_raw_tex: Option<TextureHandle>,
+    hsv_tune_morph_tex: Option<TextureHandle>,
+    hsv_tune_overlay_tex: Option<TextureHandle>,
+    last_hsv_tune_version: u64,
     logs_open: bool,
     /// Separate OS monitor window (egui immediate viewport).
     monitor_open: bool,
+    /// Separate OS HSV studio window (tools + triptych).
+    hsv_window_open: bool,
     theme_applied: bool,
 }
 
@@ -126,10 +159,26 @@ impl SmartCaptureUi {
             model,
             preview_texture: None,
             last_preview_version: 0,
+            hsv_tune_source_tex: None,
+            hsv_tune_raw_tex: None,
+            hsv_tune_morph_tex: None,
+            hsv_tune_overlay_tex: None,
+            last_hsv_tune_version: 0,
             logs_open: false,
             monitor_open: false,
+            hsv_window_open: false,
             theme_applied: false,
         }
+    }
+
+    pub fn mark_hsv_tune_dirty(&mut self) {
+        self.model.hsv_tune_dirty = true;
+    }
+
+    pub fn needs_hsv_tune_refresh(&self) -> bool {
+        self.model.config.vision_algorithms.hsv_tracking.enabled
+            && (self.hsv_window_open
+                || (self.monitor_open && self.model.hsv_mask_overlay_enabled))
     }
 
     #[must_use]
@@ -144,62 +193,60 @@ impl SmartCaptureUi {
             apply_theme(ctx, self.model.config.gui.ui_scale);
             self.theme_applied = true;
         } else {
-            // Only re-apply pixels_per_point when the user changes ui_scale.
             let scale = self.model.config.gui.ui_scale.clamp(0.75, 2.0);
             if (ctx.pixels_per_point() - scale).abs() > 0.01 {
                 ctx.set_pixels_per_point(scale);
             }
         }
 
+        // DXGI path is fixed — keep preference pinned.
+        self.model.backend_preference = CaptureBackendPreference::DxgiDuplication;
+
         if self.monitor_open {
             self.sync_preview_texture(ctx);
+        }
+        if self.hsv_window_open
+            || (self.monitor_open && self.model.hsv_mask_overlay_enabled)
+        {
+            self.sync_hsv_tune_textures(ctx);
         }
 
         let mut commands = Vec::new();
 
-        egui::TopBottomPanel::top("operator_top")
+        egui::TopBottomPanel::top("shell_transport")
             .frame(panel_frame())
             .show(ctx, |ui| {
-                self.draw_top_bar(ui, &mut commands);
+                self.draw_transport_bar(ui, &mut commands);
             });
 
-        egui::TopBottomPanel::bottom("operator_logs")
+        egui::TopBottomPanel::bottom("shell_logs")
             .resizable(true)
-            .default_height(if self.logs_open { LOG_DRAWER_H } else { 28.0 })
-            .min_height(28.0)
+            .default_height(if self.logs_open {
+                LOG_DRAWER_H
+            } else {
+                LOG_DRAWER_COLLAPSED
+            })
+            .min_height(LOG_DRAWER_COLLAPSED)
             .frame(panel_frame())
             .show(ctx, |ui| {
                 self.draw_log_drawer(ui);
-            });
-
-        egui::SidePanel::left("operator_left")
-            .exact_width(LEFT_RAIL_W)
-            .resizable(false)
-            .frame(panel_frame())
-            .show(ctx, |ui| {
-                self.draw_left_rail(ui, &mut commands);
-            });
-
-        egui::SidePanel::right("operator_right")
-            .exact_width(RIGHT_RAIL_W)
-            .resizable(false)
-            .frame(panel_frame())
-            .show(ctx, |ui| {
-                self.draw_right_rail(ui);
             });
 
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(Color32::from_rgb(241, 245, 249))
-                    .inner_margin(Margin::same(8)),
+                    .inner_margin(Margin::symmetric(12, 10)),
             )
             .show(ctx, |ui| {
-                self.draw_ops_summary(ui);
+                self.draw_compact_body(ui, &mut commands);
             });
 
         if self.monitor_open {
             self.show_monitor_viewport(ctx);
+        }
+        if self.hsv_window_open {
+            self.show_hsv_tools_viewport(ctx, &mut commands);
         }
 
         commands
@@ -208,10 +255,11 @@ impl SmartCaptureUi {
     fn show_monitor_viewport(&mut self, ctx: &egui::Context) {
         let mut close_requested = false;
 
+        let monitor_title = self.model.config.concealment.monitor_title().to_owned();
         ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("capture_monitor"),
+            egui::ViewportId::from_hash_of("vp_preview"),
             egui::ViewportBuilder::default()
-                .with_title("SmartScreenCapture — Monitor")
+                .with_title(monitor_title)
                 .with_inner_size([960.0, 540.0])
                 .with_min_inner_size([480.0, 270.0]),
             |ctx, class| {
@@ -244,17 +292,239 @@ impl SmartCaptureUi {
         }
     }
 
-    /// Central panel: minimal hint + errors only (metrics live in right rail).
-    fn draw_ops_summary(&mut self, ui: &mut egui::Ui) {
-        if !self.model.capture_running {
+    fn show_hsv_tools_viewport(&mut self, ctx: &egui::Context, commands: &mut Vec<UiCommand>) {
+        let mut close_requested = false;
+
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("vp_hsv_tools"),
+            egui::ViewportBuilder::default()
+                .with_title("Color Tools")
+                .with_inner_size([720.0, 480.0])
+                .with_min_inner_size([520.0, 360.0]),
+            |ctx, class| {
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    close_requested = true;
+                }
+
+                let frame = Frame::new()
+                    .fill(Color32::from_rgb(241, 245, 249))
+                    .inner_margin(Margin::same(12));
+
+                if class == egui::ViewportClass::Embedded {
+                    egui::Window::new("Color Tools")
+                        .default_size([640.0, 400.0])
+                        .show(ctx, |ui| {
+                            self.draw_hsv_studio(ui, commands);
+                        });
+                } else {
+                    egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+                        self.draw_hsv_studio(ui, commands);
+                    });
+                }
+            },
+        );
+
+        if close_requested {
+            self.hsv_window_open = false;
+        }
+    }
+
+    /// HSV studio: controls on top, triptych previews below (secondary window only).
+    fn draw_hsv_studio(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
+        ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Start capture · open Monitor for live view")
-                    .small()
-                    .color(TEXT_MUTED),
+                RichText::new("Color Tools")
+                    .strong()
+                    .size(14.0)
+                    .color(TEXT_PRIMARY),
             );
-        } else if let Some(size) = self.model.capture_frame_size {
             ui.label(
-                RichText::new(format!("Capture {}×{}", size.width, size.height))
+                RichText::new(format!(
+                    "Coverage {:.1}% · Objects {}",
+                    self.model.hsv_coverage_pct,
+                    self.model.hsv_hit_count()
+                ))
+                .small()
+                .color(TEXT_MUTED),
+            );
+        });
+        ui.add_space(6.0);
+
+        Frame::new()
+            .fill(SURFACE)
+            .stroke(Stroke::new(1.0, BORDER))
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                self.draw_hsv_tools(ui, commands);
+            });
+
+        ui.add_space(8.0);
+        self.draw_hsv_tuning_panel(ui);
+    }
+
+    fn draw_hsv_tuning_panel(&mut self, ui: &mut egui::Ui) {
+        let available = ui.available_size();
+        let col_w = (available.x / 3.0 - 8.0).max(80.0);
+        let preview_h = (available.y - 8.0).max(120.0);
+
+        ui.columns(3, |columns| {
+            draw_tune_column(
+                &mut columns[0],
+                "Source",
+                self.hsv_tune_source_tex.as_ref(),
+                col_w,
+                preview_h,
+                &self.model,
+                None,
+            );
+            columns[1].vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Mask").strong().size(12.0));
+                    ui.selectable_value(
+                        &mut self.model.hsv_preview_mask_mode,
+                        HsvPreviewMaskMode::RawMask,
+                        "Raw",
+                    );
+                    ui.selectable_value(
+                        &mut self.model.hsv_preview_mask_mode,
+                        HsvPreviewMaskMode::MorphMask,
+                        "Morph",
+                    );
+                });
+                let mask_tex = match self.model.hsv_preview_mask_mode {
+                    HsvPreviewMaskMode::RawMask => self.hsv_tune_raw_tex.as_ref(),
+                    HsvPreviewMaskMode::MorphMask => self.hsv_tune_morph_tex.as_ref(),
+                };
+                draw_tune_image(ui, mask_tex, col_w, preview_h - 20.0);
+            });
+            draw_tune_column(
+                &mut columns[2],
+                "Detection",
+                self.hsv_tune_overlay_tex.as_ref(),
+                col_w,
+                preview_h,
+                &self.model,
+                Some(&self.model.hsv),
+            );
+        });
+    }
+
+    /// Compact main body — display pick + modes + mini status (MP3-style).
+    fn draw_compact_body(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
+        // Display picker card
+        Frame::new()
+            .fill(SURFACE)
+            .stroke(Stroke::new(1.0, BORDER))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Display").small().color(TEXT_MUTED));
+                    ui.add_space(4.0);
+
+                    let selected_label = self
+                        .model
+                        .targets
+                        .get(self.model.selected_target)
+                        .map(|t| {
+                            format!(
+                                "{}{} · {}×{}",
+                                t.name,
+                                if t.primary { " ★" } else { "" },
+                                t.size.width,
+                                t.size.height
+                            )
+                        })
+                        .unwrap_or_else(|| "No display".to_owned());
+
+                    egui::ComboBox::from_id_salt("display_pick")
+                        .selected_text(selected_label)
+                        .width(ui.available_width().min(240.0).max(160.0))
+                        .show_ui(ui, |ui| {
+                            if self.model.targets.is_empty() {
+                                ui.label(RichText::new("Refresh targets").color(TEXT_MUTED));
+                            }
+                            for (index, target) in self.model.targets.iter().enumerate() {
+                                let label = format!(
+                                    "{}{} ({}×{})",
+                                    target.name,
+                                    if target.primary { " ★" } else { "" },
+                                    target.size.width,
+                                    target.size.height
+                                );
+                                if ui
+                                    .selectable_label(self.model.selected_target == index, label)
+                                    .clicked()
+                                {
+                                    self.model.selected_target = index;
+                                }
+                            }
+                        });
+
+                    if ui
+                        .small_button(RichText::new("↻").color(TEXT_MUTED))
+                        .on_hover_text("Refresh displays")
+                        .clicked()
+                    {
+                        commands.push(UiCommand::RefreshTargets);
+                    }
+                });
+            });
+
+        ui.add_space(8.0);
+
+        // Mode chips + FPS
+        Frame::new()
+            .fill(SURFACE)
+            .stroke(Stroke::new(1.0, BORDER))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.model.preview_enabled, "Feed");
+                    ui.checkbox(
+                        &mut self.model.config.vision_algorithms.hsv_tracking.enabled,
+                        "HSV",
+                    );
+                    ui.checkbox(
+                        &mut self.model.config.vision_algorithms.yolo26_detection.enabled,
+                        "YOLO",
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.model.config.performance.target_fps)
+                                .range(1..=360)
+                                .suffix(" fps")
+                                .speed(1.0),
+                        );
+                        ui.label(RichText::new("Rate").small().color(TEXT_MUTED));
+                    });
+                });
+
+                // Auto-close HSV window when HSV disabled.
+                if !self.model.config.vision_algorithms.hsv_tracking.enabled {
+                    self.hsv_window_open = false;
+                }
+            });
+
+        ui.add_space(8.0);
+
+        // Mini status line (like now-playing metadata)
+        let hsv_n = self.model.hsv_hit_count();
+        let yolo_n = self.model.yolo_detection_count();
+        let fps = self.model.performance.fps;
+        let drop = self.model.performance.dropped_frames;
+        let status = if self.model.capture_running {
+            format!("H:{hsv_n}  Y:{yolo_n}  ·  {fps:.0} fps  ·  {drop} drop")
+        } else {
+            "Ready — press Start to share".to_owned()
+        };
+        ui.label(RichText::new(status).small().color(TEXT_MUTED));
+
+        if let Some(size) = self.model.capture_frame_size.filter(|_| self.model.capture_running) {
+            ui.label(
+                RichText::new(format!("{}×{}", size.width, size.height))
                     .small()
                     .color(TEXT_MUTED),
             );
@@ -264,12 +534,43 @@ impl SmartCaptureUi {
             ui.add_space(6.0);
             Frame::new()
                 .fill(Color32::from_rgb(254, 226, 226))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(Margin::symmetric(8, 4))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.colored_label(Color32::from_rgb(153, 27, 27), error);
                 });
         }
+    }
+
+    fn sync_hsv_tune_textures(&mut self, ctx: &egui::Context) {
+        if self.model.hsv_tune_version == self.last_hsv_tune_version {
+            return;
+        }
+        self.last_hsv_tune_version = self.model.hsv_tune_version;
+        sync_texture_slot(
+            ctx,
+            &mut self.hsv_tune_source_tex,
+            "hsv-tune-source",
+            self.model.hsv_tune_source.as_ref(),
+        );
+        sync_texture_slot(
+            ctx,
+            &mut self.hsv_tune_raw_tex,
+            "hsv-tune-raw",
+            self.model.hsv_tune_raw.as_ref(),
+        );
+        sync_texture_slot(
+            ctx,
+            &mut self.hsv_tune_morph_tex,
+            "hsv-tune-morph",
+            self.model.hsv_tune_morph.as_ref(),
+        );
+        sync_texture_slot(
+            ctx,
+            &mut self.hsv_tune_overlay_tex,
+            "hsv-tune-overlay",
+            self.model.hsv_tune_overlay.as_ref(),
+        );
     }
 
     fn sync_preview_texture(&mut self, ctx: &egui::Context) {
@@ -295,183 +596,33 @@ impl SmartCaptureUi {
         }
     }
 
-    fn draw_top_bar(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
+    fn draw_transport_bar(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("SmartScreenCapture")
+                RichText::new(self.model.config.concealment.display_name())
                     .strong()
-                    .size(14.0)
-                    .color(Color32::from_rgb(15, 23, 42)),
+                    .size(15.0)
+                    .color(TEXT_PRIMARY),
             );
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             status_chip(ui, self.model.capture_running, self.model.last_error.is_some());
-            badge(ui, "DXGI", "dup");
-            badge(ui, "EP", &provider_label(&self.model.provider_state));
-            if self.model.capture_running {
-                if let Some(backend) = self.model.active_backend {
-                    badge(ui, "Cap", backend_kind_label(backend));
-                }
-            }
-            if self.monitor_open {
-                badge(ui, "Mon", "on");
-            }
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                let start_stop = if self.model.capture_running {
-                    ("Stop", true)
-                } else {
-                    ("Start", false)
-                };
-                let start_btn = egui::Button::new(
-                    RichText::new(start_stop.0)
-                        .strong()
-                        .color(Color32::WHITE),
-                )
-                .fill(if start_stop.1 {
-                    Color32::from_rgb(185, 28, 28)
-                } else {
-                    ACCENT
-                })
-                .corner_radius(CornerRadius::same(6));
-                if ui.add(start_btn).clicked() {
-                    commands.push(if self.model.capture_running {
-                        UiCommand::StopCapture
-                    } else {
-                        UiCommand::StartCapture
-                    });
-                }
-                if ui.small_button("Save").clicked() {
-                    commands.push(UiCommand::SaveSettings);
-                }
-                if ui.small_button("Model").clicked() {
-                    commands.push(UiCommand::LoadModel);
-                }
-                if ui.small_button("Refresh").clicked() {
-                    commands.push(UiCommand::RefreshTargets);
-                }
-                let monitor_label = if self.monitor_open { "Monitor ✕" } else { "Monitor" };
-                if ui.small_button(monitor_label).clicked() {
-                    self.monitor_open = !self.monitor_open;
-                }
-            });
-        });
-    }
-
-    fn draw_left_rail(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            section_title(ui, "Capture target");
-            if self.model.targets.is_empty() {
-                ui.label(RichText::new("No targets yet — Refresh").color(TEXT_MUTED));
-            } else {
-                for (index, target) in self.model.targets.iter().enumerate() {
-                    let selected = self.model.selected_target == index;
-                    let label = format!(
-                        "{}{} ({}×{})",
-                        target.name,
-                        if target.primary { " ★" } else { "" },
-                        target.size.width,
-                        target.size.height
-                    );
-                    if ui.selectable_label(selected, label).clicked() {
-                        self.model.selected_target = index;
+                // Overflow menu: secondary actions
+                ui.menu_button(RichText::new("···").strong(), |ui| {
+                    if ui.button("Save settings").clicked() {
+                        commands.push(UiCommand::SaveSettings);
+                        ui.close();
                     }
-                }
-            }
-
-            if let Some(target) = self.model.targets.get(self.model.selected_target) {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(format!(
-                        "{} · {}",
-                        target.device_name.as_deref().unwrap_or("device?"),
-                        target.adapter_name.as_deref().unwrap_or("adapter?")
-                    ))
-                    .small()
-                    .color(TEXT_MUTED),
-                );
-            }
-
-            ui.add_space(8.0);
-            section_title(ui, "Runtime");
-
-            // Keep preference pinned — no WGC/DXGI switcher (single-path plan).
-            self.model.backend_preference = CaptureBackendPreference::DxgiDuplication;
-
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.model.preview_enabled, "Feed");
-                ui.checkbox(
-                    &mut self.model.config.vision_algorithms.hsv_tracking.enabled,
-                    "HSV",
-                );
-                ui.checkbox(
-                    &mut self.model.config.vision_algorithms.yolo26_detection.enabled,
-                    "YOLO",
-                );
-            });
-
-            ui.add_space(4.0);
-            let hsv_enabled = self.model.config.vision_algorithms.hsv_tracking.enabled;
-            ui.add_enabled_ui(hsv_enabled, |ui| {
-                egui::CollapsingHeader::new("HSV Tools")
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        self.draw_hsv_tools(ui, commands);
-                    });
-            });
-
-            ui.add_space(4.0);
-            ui.columns(3, |columns| {
-                columns[0].horizontal(|ui| {
-                    ui.label("FPS");
-                    ui.add(
-                        egui::DragValue::new(&mut self.model.config.performance.target_fps)
-                            .range(1..=360),
-                    );
-                });
-                columns[1].horizontal(|ui| {
-                    ui.label("Buf");
-                    ui.add(
-                        egui::DragValue::new(&mut self.model.config.performance.frame_buffer_size)
-                            .range(1..=32),
-                    );
-                });
-                columns[2].horizontal(|ui| {
-                    ui.label("DML");
-                    ui.add(
-                        egui::DragValue::new(
-                            &mut self
-                                .model
-                                .config
-                                .vision_algorithms
-                                .yolo26_detection
-                                .selected_gpu_id,
-                        )
-                        .range(0..=16),
-                    );
-                });
-            });
-
-            ui.add_space(8.0);
-            egui::CollapsingHeader::new("Advanced")
-                .default_open(false)
-                .show(ui, |ui| {
-                    let yolo = &self.model.config.vision_algorithms.yolo26_detection;
-                    ui.label(
-                        RichText::new(format!("Model: {}", yolo.onnx_model_path.display()))
-                            .small(),
-                    );
-                    ui.label(
-                        RichText::new(format!("Classes: {}", yolo.class_names_path.display()))
-                            .small(),
-                    );
-                    ui.label(
-                        RichText::new(format!("EP: {}", yolo.execution_providers.join(", ")))
-                            .small(),
-                    );
-                    match &yolo.openvino_device_type {
-                        Some(d) => ui.label(RichText::new(format!("OpenVINO: {d}")).small()),
-                        None => ui.label(RichText::new("OpenVINO: GPU→NPU auto").small()),
-                    };
+                    if ui.button("Load model").clicked() {
+                        commands.push(UiCommand::LoadModel);
+                        ui.close();
+                    }
+                    if ui.button("Refresh displays").clicked() {
+                        commands.push(UiCommand::RefreshTargets);
+                        ui.close();
+                    }
+                    ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("UI scale");
                         ui.add(
@@ -480,25 +631,106 @@ impl SmartCaptureUi {
                                 .speed(0.05),
                         );
                     });
-                    if let Some(path) = &self.model.config_path {
+                    ui.horizontal(|ui| {
+                        ui.label("Buffer");
+                        ui.add(
+                            egui::DragValue::new(
+                                &mut self.model.config.performance.frame_buffer_size,
+                            )
+                            .range(1..=32),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("GPU id");
+                        ui.add(
+                            egui::DragValue::new(
+                                &mut self
+                                    .model
+                                    .config
+                                    .vision_algorithms
+                                    .yolo26_detection
+                                    .selected_gpu_id,
+                            )
+                            .range(0..=16),
+                        );
+                    });
+                    ui.separator();
+                    let ep = provider_label(&self.model.provider_state);
+                    ui.label(RichText::new(format!("EP: {ep}")).small().color(TEXT_MUTED));
+                    if let Some(backend) = self.model.active_backend {
                         ui.label(
-                            RichText::new(format!("Config: {}", path.display()))
+                            RichText::new(format!("IO: {}", backend_kind_label(backend)))
                                 .small()
                                 .color(TEXT_MUTED),
                         );
                     }
                 });
+
+                let hsv_on = self.model.config.vision_algorithms.hsv_tracking.enabled;
+                ui.add_enabled_ui(hsv_on, |ui| {
+                    let hsv_label = if self.hsv_window_open {
+                        "Color ✕"
+                    } else {
+                        "Color"
+                    };
+                    if ui
+                        .small_button(hsv_label)
+                        .on_hover_text("Open color / HSV tools window")
+                        .clicked()
+                    {
+                        self.hsv_window_open = !self.hsv_window_open;
+                    }
+                });
+
+                let mon_label = if self.monitor_open {
+                    "View ✕"
+                } else {
+                    "View"
+                };
+                if ui
+                    .small_button(mon_label)
+                    .on_hover_text("Open live preview window")
+                    .clicked()
+                {
+                    self.monitor_open = !self.monitor_open;
+                }
+
+                let (label, stopping) = if self.model.capture_running {
+                    ("Stop", true)
+                } else {
+                    ("Start", false)
+                };
+                let start_btn = egui::Button::new(
+                    RichText::new(label).strong().color(Color32::WHITE).size(13.0),
+                )
+                .fill(if stopping {
+                    Color32::from_rgb(185, 28, 28)
+                } else {
+                    ACCENT
+                })
+                .corner_radius(CornerRadius::same(8))
+                .min_size(Vec2::new(72.0, 28.0));
+                if ui.add(start_btn).clicked() {
+                    commands.push(if self.model.capture_running {
+                        UiCommand::StopCapture
+                    } else {
+                        UiCommand::StartCapture
+                    });
+                }
+            });
         });
     }
 
     fn draw_hsv_tools(&mut self, ui: &mut egui::Ui, commands: &mut Vec<UiCommand>) {
-        let hsv = &mut self.model.config.vision_algorithms.hsv_tracking;
-        let mut h_min = hsv.lower_bound[0];
-        let mut h_max = hsv.upper_bound[0];
-        let mut s_min = hsv.lower_bound[1];
-        let mut s_max = hsv.upper_bound[1];
-        let mut v_min = hsv.lower_bound[2];
-        let mut v_max = hsv.upper_bound[2];
+        let tracking = &self.model.config.vision_algorithms.hsv_tracking;
+        let mut h_min = tracking.lower_bound[0];
+        let mut h_max = tracking.upper_bound[0];
+        let mut s_min = tracking.lower_bound[1];
+        let mut s_max = tracking.upper_bound[1];
+        let mut v_min = tracking.lower_bound[2];
+        let mut v_max = tracking.upper_bound[2];
+        let mut min_area = tracking.min_contour_area;
+        let mut morph_kernel = tracking.morphology_kernel_size;
 
         let mut changed = false;
         changed |= hsv_slider_row(ui, "H", &mut h_min, &mut h_max, 179);
@@ -515,13 +747,17 @@ impl SmartCaptureUi {
             if v_min > v_max {
                 v_min = v_max;
             }
+            let hsv = &mut self.model.config.vision_algorithms.hsv_tracking;
             hsv.lower_bound = [h_min, s_min, v_min];
             hsv.upper_bound = [h_max, s_max, v_max];
+            self.mark_hsv_tune_dirty();
         }
 
         ui.label(
             RichText::new(format!(
-                "H[{h_min}-{h_max}] S[{s_min}-{s_max}] V[{v_min}-{v_max}]"
+                "Coverage {:.1}% · {} objects",
+                self.model.hsv_coverage_pct,
+                self.model.hsv_hit_count()
             ))
             .small()
             .color(TEXT_MUTED),
@@ -536,20 +772,27 @@ impl SmartCaptureUi {
             }
         });
 
+        let mut morph_changed = false;
         ui.horizontal(|ui| {
             ui.label("Min area");
-            ui.add(
-                egui::DragValue::new(&mut hsv.min_contour_area)
-                    .range(1..=10_000),
-            );
+            morph_changed |= ui
+                .add(egui::DragValue::new(&mut min_area).range(1..=10_000))
+                .changed();
         });
+        let mut kernel_changed = false;
         ui.horizontal(|ui| {
             ui.label("Morph kernel");
-            ui.add(
-                egui::DragValue::new(&mut hsv.morphology_kernel_size)
-                    .range(1..=15),
-            );
+            kernel_changed |= ui
+                .add(egui::DragValue::new(&mut morph_kernel).range(1..=15))
+                .changed();
         });
+        if morph_changed || kernel_changed {
+            let hsv = &mut self.model.config.vision_algorithms.hsv_tracking;
+            hsv.min_contour_area = min_area;
+            hsv.morphology_kernel_size = morph_kernel;
+            self.mark_hsv_tune_dirty();
+        }
+        // Mask overlay toggle lives only on the Monitor (View) window.
     }
 
     fn draw_preview_stage(&mut self, ui: &mut egui::Ui) {
@@ -562,6 +805,14 @@ impl SmartCaptureUi {
                     .small()
                     .color(TEXT_MUTED),
             );
+            if self.model.config.vision_algorithms.hsv_tracking.enabled {
+                if ui
+                    .checkbox(&mut self.model.hsv_mask_overlay_enabled, "Mask")
+                    .changed()
+                {
+                    self.mark_hsv_tune_dirty();
+                }
+            }
             if yolo_on
                 && matches!(
                     self.model.provider_state,
@@ -617,118 +868,25 @@ impl SmartCaptureUi {
             image_rect,
             tex_size,
             &self.model,
+            self.hsv_tune_morph_tex.as_ref(),
         );
-    }
-
-    fn draw_right_rail(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            section_title(ui, "Live metrics");
-            let hsv_n = self.model.hsv_hit_count();
-            let yolo_n = self.model.yolo_detection_count();
-            compact_metrics_grid(ui, [
-                ("FPS", format!("{:.1}", self.model.performance.fps)),
-                (
-                    "Frame",
-                    format!("{:.1}ms", self.model.performance.frame_time_ms),
-                ),
-                (
-                    "Proc",
-                    format!("{:.0}ms", self.model.performance.processing_time_ms),
-                ),
-                (
-                    "Drop",
-                    self.model.performance.dropped_frames.to_string(),
-                ),
-                (
-                    "Total",
-                    self.model.performance.total_frames.to_string(),
-                ),
-                ("Det", format!("HSV {hsv_n} / YOLO {yolo_n}")),
-            ]);
-
-            ui.add_space(6.0);
-            section_title(ui, "Detections");
-            if self.model.yolo_detections.is_empty() {
-                ui.label(RichText::new("No detections").color(TEXT_MUTED));
-            } else {
-                let mut ranked = self.model.yolo_detections.clone();
-                ranked.sort_by(|a, b| b.confidence_milli.cmp(&a.confidence_milli));
-                for det in ranked.iter().take(12) {
-                    let conf = det.confidence_milli as f32 / 10.0;
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&det.label).strong());
-                        ui.label(RichText::new(format!("{conf:.0}%")).color(ACCENT));
-                    });
-                    egui::CollapsingHeader::new("bbox")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}×{} @ ({}, {})",
-                                    det.bounding_box.width,
-                                    det.bounding_box.height,
-                                    det.bounding_box.x,
-                                    det.bounding_box.y
-                                ))
-                                .small()
-                                .color(TEXT_MUTED),
-                            );
-                        });
-                }
-            }
-
-            ui.add_space(6.0);
-            section_title(ui, "Inference");
-            ui.label(format!(
-                "Classes: {}",
-                self.model.inference_diagnostics.class_count
-            ));
-            if let Some(shape) = &self.model.inference_diagnostics.last_output_shape {
-                ui.label(format!("Output: {}", format_shape(shape)));
-            }
-            if let Some(reason) = &self.model.inference_diagnostics.fallback_reason {
-                ui.colored_label(ui.visuals().warn_fg_color, reason);
-            }
-
-            egui::CollapsingHeader::new("Diagnostics")
-                .default_open(false)
-                .show(ui, |ui| {
-                    if let Some(graph) = &self.model.inference_diagnostics.model_metadata.graph_name
-                    {
-                        ui.label(format!("Graph: {graph}"));
-                    }
-                    if let Some(producer) =
-                        &self.model.inference_diagnostics.model_metadata.producer
-                    {
-                        ui.label(format!("Producer: {producer}"));
-                    }
-                    render_descriptors(ui, "Inputs", &self.model.inference_diagnostics.inputs);
-                    render_descriptors(ui, "Outputs", &self.model.inference_diagnostics.outputs);
-                    for note in &self.model.inference_diagnostics.validation_notes {
-                        ui.colored_label(ui.visuals().warn_fg_color, note);
-                    }
-                    if let Some(err) = &self.model.inference_diagnostics.last_error {
-                        ui.colored_label(ui.visuals().error_fg_color, err);
-                    }
-                });
-        });
     }
 
     fn draw_log_drawer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let label = if self.logs_open {
-                "▾ Logs"
+                "▾ Session log"
             } else {
-                "▸ Logs"
+                "▸ Session log"
             };
             if ui
-                .add(egui::Button::new(RichText::new(label).strong()).frame(false))
+                .add(egui::Button::new(RichText::new(label).strong().size(12.0)).frame(false))
                 .clicked()
             {
                 self.logs_open = !self.logs_open;
             }
             ui.label(
-                RichText::new(format!("{} lines", self.model.logs.len()))
+                RichText::new(format!("{}", self.model.logs.len()))
                     .small()
                     .color(TEXT_MUTED),
             );
@@ -736,9 +894,10 @@ impl SmartCaptureUi {
         if self.logs_open {
             egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
+                .max_height(LOG_DRAWER_H - 8.0)
                 .show(ui, |ui| {
                     for line in &self.model.logs {
-                        ui.label(RichText::new(line).monospace().size(12.0));
+                        ui.label(RichText::new(line).monospace().size(11.0).color(TEXT_MUTED));
                     }
                 });
         }
@@ -750,6 +909,7 @@ fn paint_overlays(
     image_rect: Rect,
     tex_size: Vec2,
     model: &UiModel,
+    hsv_mask_texture: Option<&TextureHandle>,
 ) {
     let Some(capture_size) = model.capture_frame_size else {
         return;
@@ -777,6 +937,17 @@ fn paint_overlays(
         );
         Rect::from_min_max(min, max)
     };
+
+    if model.hsv_mask_overlay_enabled {
+        if let Some(mask_tex) = hsv_mask_texture {
+            painter.image(
+                mask_tex.id(),
+                image_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::from_rgba_premultiplied(217, 119, 6, 100),
+            );
+        }
+    }
 
     if let Some(roi) = model.capture_roi {
         let roi_screen = frame_rect_to_screen(roi.rect);
@@ -875,6 +1046,108 @@ fn paint_overlays(
     }
 }
 
+fn sync_texture_slot(
+    ctx: &egui::Context,
+    slot: &mut Option<TextureHandle>,
+    label: &str,
+    image: Option<&ColorImage>,
+) {
+    match image {
+        Some(img) => {
+            if let Some(texture) = slot {
+                texture.set(img.clone(), TextureOptions::LINEAR);
+            } else {
+                *slot = Some(ctx.load_texture(label, img.clone(), TextureOptions::LINEAR));
+            }
+        }
+        None => {
+            *slot = None;
+        }
+    }
+}
+
+fn draw_tune_column(
+    ui: &mut egui::Ui,
+    title: &str,
+    texture: Option<&TextureHandle>,
+    width: f32,
+    height: f32,
+    model: &UiModel,
+    hsv_boxes: Option<&HsvMaskStats>,
+) {
+    ui.label(RichText::new(title).strong().size(12.0));
+    let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::hover());
+    let rect = response.rect;
+    painter.rect_filled(rect, CornerRadius::same(4), SURFACE);
+    painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, BORDER), egui::StrokeKind::Outside);
+
+    if let Some(tex) = texture {
+        painter.image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Waiting…",
+            FontId::proportional(12.0),
+            TEXT_MUTED,
+        );
+    }
+
+    if let (Some(hsv), Some(capture_size)) = (hsv_boxes, model.capture_frame_size) {
+        if capture_size.width > 0 && capture_size.height > 0 {
+            let sx = rect.width() / capture_size.width as f32;
+            let sy = rect.height() / capture_size.height as f32;
+            for obj in &hsv.objects {
+                let r = obj.rect;
+                let screen = Rect::from_min_max(
+                    Pos2::new(
+                        rect.min.x + r.x as f32 * sx,
+                        rect.min.y + r.y as f32 * sy,
+                    ),
+                    Pos2::new(
+                        rect.min.x + (r.x + r.width as i32) as f32 * sx,
+                        rect.min.y + (r.y + r.height as i32) as f32 * sy,
+                    ),
+                );
+                painter.rect_stroke(
+                    screen,
+                    CornerRadius::ZERO,
+                    Stroke::new(2.0, HSV_STROKE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        }
+    }
+}
+
+fn draw_tune_image(ui: &mut egui::Ui, texture: Option<&TextureHandle>, width: f32, height: f32) {
+    let (response, painter) = ui.allocate_painter(Vec2::new(width, height.max(40.0)), Sense::hover());
+    let rect = response.rect;
+    painter.rect_filled(rect, CornerRadius::same(4), SURFACE);
+    painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, BORDER), egui::StrokeKind::Outside);
+    if let Some(tex) = texture {
+        painter.image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Waiting…",
+            FontId::proportional(12.0),
+            TEXT_MUTED,
+        );
+    }
+}
+
 fn apply_theme(ctx: &egui::Context, ui_scale: f32) {
     let mut visuals = egui::Visuals::light();
     visuals.panel_fill = PANEL_BG;
@@ -888,6 +1161,12 @@ fn apply_theme(ctx: &egui::Context, ui_scale: f32) {
     visuals.hyperlink_color = ACCENT;
     ctx.set_visuals(visuals);
 
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = Vec2::new(6.0, 4.0);
+    style.spacing.button_padding = Vec2::new(8.0, 4.0);
+    style.spacing.window_margin = Margin::same(8);
+    ctx.set_style(style);
+
     let scale = ui_scale.clamp(0.75, 2.0);
     // Only update when the scale actually changes — calling every frame can
     // destabilize the Win32/wgpu surface and surface as 0xc000041d.
@@ -899,7 +1178,7 @@ fn apply_theme(ctx: &egui::Context, ui_scale: f32) {
 fn panel_frame() -> Frame {
     Frame::new()
         .fill(PANEL_BG)
-        .inner_margin(Margin::symmetric(8, 6))
+        .inner_margin(Margin::symmetric(10, 6))
         .stroke(Stroke::new(1.0, BORDER))
 }
 
@@ -923,50 +1202,16 @@ fn hsv_slider_row(
     changed
 }
 
-fn section_title(ui: &mut egui::Ui, title: &str) {
-    ui.label(
-        RichText::new(title)
-            .strong()
-            .size(12.0)
-            .color(Color32::from_rgb(15, 23, 42)),
-    );
-    ui.add_space(2.0);
-}
-
-fn compact_metric(ui: &mut egui::Ui, label: &str, value: &str) {
-    Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(8, 4))
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new(label).small().color(TEXT_MUTED));
-                ui.label(RichText::new(value).strong().size(14.0));
-            });
-        });
-}
-
-fn compact_metrics_grid(ui: &mut egui::Ui, metrics: [(&str, String); 6]) {
-    ui.columns(2, |columns| {
-        for (index, (label, value)) in metrics.into_iter().enumerate() {
-            columns[index % 2].vertical(|ui| {
-                compact_metric(ui, label, &value);
-            });
-        }
-    });
-}
-
-fn status_chip(ui: &mut egui::Ui, capturing: bool, errored: bool) {
+fn status_chip(ui: &mut egui::Ui, sharing: bool, errored: bool) {
     let (text, fill, fg) = if errored {
         (
             "Error",
             Color32::from_rgb(254, 226, 226),
             Color32::from_rgb(153, 27, 27),
         )
-    } else if capturing {
+    } else if sharing {
         (
-            "Capturing",
+            "Sharing",
             Color32::from_rgb(204, 251, 241),
             Color32::from_rgb(15, 118, 110),
         )
@@ -983,21 +1228,6 @@ fn status_chip(ui: &mut egui::Ui, capturing: bool, errored: bool) {
         .inner_margin(Margin::symmetric(8, 3))
         .show(ui, |ui| {
             ui.label(RichText::new(text).strong().color(fg).size(12.0));
-        });
-}
-
-fn badge(ui: &mut egui::Ui, key: &str, value: &str) {
-    Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(format!("{key}: {value}"))
-                    .small()
-                    .color(TEXT_MUTED),
-            );
         });
 }
 
@@ -1028,43 +1258,4 @@ fn fit_inside(source: Vec2, available: Vec2) -> Vec2 {
     Vec2::new(source.x * scale, source.y * scale)
 }
 
-fn render_descriptors(
-    ui: &mut egui::Ui,
-    heading: &str,
-    descriptors: &[capture_core::InferenceIoDescriptor],
-) {
-    ui.label(RichText::new(heading).strong());
-    if descriptors.is_empty() {
-        ui.label("none");
-        return;
-    }
-    for descriptor in descriptors {
-        ui.label(
-            RichText::new(format!(
-                "{}: {}{}{}",
-                descriptor.name,
-                descriptor.value_type,
-                descriptor
-                    .tensor_shape
-                    .as_ref()
-                    .map(|shape| format!(" shape={}", format_shape(shape)))
-                    .unwrap_or_default(),
-                descriptor
-                    .tensor_element_type
-                    .as_ref()
-                    .map(|element| format!(" element={element}"))
-                    .unwrap_or_default()
-            ))
-            .small(),
-        );
-    }
-}
 
-fn format_shape(shape: &[i64]) -> String {
-    let body = shape
-        .iter()
-        .map(|dim| dim.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{body}]")
-}
