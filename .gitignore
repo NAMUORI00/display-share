@@ -1,70 +1,9 @@
-# Build directories
-build/
-ScreenMonitor/build-*/
-build-test/
-out/
-Debug/
-Release/
-RelWithDebInfo/
-MinSizeRel/
+# Rust
+capture-first/target/
 
 # Visual Studio Code
 .vscode/
 *.code-workspace
-
-# ImGui runtime layout/state file
-imgui.ini
-
-# CMake
-CMakeCache.txt
-CMakeFiles/
-CMakeScripts/
-Testing/
-Makefile
-cmake_install.cmake
-install_manifest.txt
-compile_commands.json
-CTestTestfile.cmake
-_deps
-
-# vcpkg
-vcpkg_installed/
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Package files for redistribution
-*.dmg
-*.pkg
-*.deb
-*.rpm
 
 # Logs
 *.log
@@ -87,29 +26,11 @@ Thumbs.db
 *.swp
 *.swo
 *.user
-*.filters
-*.vcxproj
-*.vcxproj.user
-*.suo
-*.opensdf
-*.sdf
-*.VC.db
-*.VC.opendb
-
-# Local generated solution files (keep if manually curated)
-*.sln
-
-# CMake generated per-config directories
-Debug/
-Release/
-RelWithDebInfo/
-MinSizeRel/
 
 # Configuration files that might contain sensitive info
 config/secrets.json
 *.env
 .env
 
-# Bundled runtime downloads
-ScreenMonitor/external/onnxruntime/
-capture-first/target/
+# Large / local model assets (keep coco_classes.txt tracked)
+models/*.onnx

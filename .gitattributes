@@ -12,6 +12,3 @@
 # Keep Windows batch files CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
-
-# Prevent merge conflicts for lock/cmake cache
-CMakeCache.txt -merge
