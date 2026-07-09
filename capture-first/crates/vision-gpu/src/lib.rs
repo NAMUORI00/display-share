@@ -1,9 +1,11 @@
 //! GPU-oriented vision helpers. GPU resize/shader preprocess is Track 2;
 //! `prepare_for_inference` currently does honest CPU preprocess (resize + NCHW).
 
+mod hsv_detect;
+
 use capture_core::{
     CaptureFrame, CaptureRoi, CpuBuffer, CpuNchwTensor, HsvMaskStats, HsvSettings, PixelFormat,
-    ProcessedFrame, RectI, RoiSpec, Size2D, TensorInputHandle, VisionError, VisionPipeline,
+    ProcessedFrame, RoiSpec, Size2D, TensorInputHandle, VisionError, VisionPipeline,
 };
 use image::{RgbImage, imageops::FilterType};
 
@@ -66,50 +68,18 @@ impl GpuVisionPipeline {
         }
     }
 
-    /// HSV mask stats (hit count + union bbox). Not per-pixel DetectionResult spam.
+    /// HSV mask stats with contour-based bounding boxes (HsvColorPicker-style).
     pub fn detect_hsv_stats(
         &self,
         buffer: &CpuBuffer,
         settings: &HsvSettings,
+        frame_size: Size2D,
     ) -> Result<HsvMaskStats, VisionError> {
         if !settings.enabled {
             return Ok(HsvMaskStats::default());
         }
         ensure_canonical_format(buffer.pixel_format)?;
-
-        let mut hit_count = 0usize;
-        let mut bbox_union: Option<RectI> = None;
-        let min_area = settings.min_contour_area.max(1);
-
-        for y in 0..buffer.height {
-            for x in 0..buffer.width {
-                let idx = y as usize * buffer.stride as usize + x as usize * 4;
-                let pixel = &buffer.data[idx..idx + 4];
-                let (r, g, b) = match buffer.pixel_format {
-                    PixelFormat::Bgra8Unorm => (pixel[2], pixel[1], pixel[0]),
-                    PixelFormat::Rgba8Unorm => (pixel[0], pixel[1], pixel[2]),
-                };
-                let hsv = rgb_to_hsv(r, g, b);
-                if within_range(hsv, &settings.range.lower, &settings.range.upper) {
-                    hit_count += 1;
-                    let cell = RectI::new(x as i32, y as i32, 1, 1);
-                    bbox_union = Some(match bbox_union {
-                        Some(existing) => existing.union(cell),
-                        None => cell,
-                    });
-                }
-            }
-        }
-
-        // min_contour_area: drop tiny masks (morphology deferred; area gate applied).
-        if hit_count < min_area as usize {
-            return Ok(HsvMaskStats::default());
-        }
-
-        Ok(HsvMaskStats {
-            hit_count,
-            bbox_union,
-        })
+        Ok(hsv_detect::detect_hsv_on_buffer(buffer, settings, frame_size))
     }
 
     pub fn crop_capture_roi(
@@ -118,6 +88,16 @@ impl GpuVisionPipeline {
         roi: CaptureRoi,
     ) -> Result<ProcessedFrame, VisionError> {
         self.crop_roi(frame, roi.into())
+    }
+
+    /// Downscale a CPU buffer so the long edge is at most `max_long_edge`.
+    /// Returns `(preview_buffer, uniform_scale)` where scale = preview / original.
+    pub fn downscale_for_preview(
+        &self,
+        buffer: &CpuBuffer,
+        max_long_edge: u32,
+    ) -> Result<(CpuBuffer, f32), VisionError> {
+        downscale_cpu_buffer(buffer, max_long_edge)
     }
 }
 
@@ -184,6 +164,48 @@ fn to_rgb_image(buffer: &CpuBuffer) -> Result<RgbImage, VisionError> {
         .ok_or_else(|| VisionError::Other("failed to build RGB image".to_owned()))
 }
 
+/// Public helper for pipeline full-frame preview downscale.
+pub fn downscale_cpu_buffer(
+    buffer: &CpuBuffer,
+    max_long_edge: u32,
+) -> Result<(CpuBuffer, f32), VisionError> {
+    ensure_canonical_format(buffer.pixel_format)?;
+    let long_edge = buffer.width.max(buffer.height);
+    if long_edge == 0 {
+        return Ok((buffer.clone(), 1.0));
+    }
+    if long_edge <= max_long_edge {
+        return Ok((buffer.clone(), 1.0));
+    }
+
+    let scale = max_long_edge as f32 / long_edge as f32;
+    let out_w = ((buffer.width as f32 * scale).round() as u32).max(1);
+    let out_h = ((buffer.height as f32 * scale).round() as u32).max(1);
+    let actual_scale = out_w as f32 / buffer.width as f32;
+
+    let rgb = to_rgb_image(buffer)?;
+    let resized = image::imageops::resize(&rgb, out_w, out_h, FilterType::Triangle);
+    let mut out = CpuBuffer::empty(Size2D::new(out_w, out_h), buffer.pixel_format);
+    for (x, y, pixel) in resized.enumerate_pixels() {
+        let dst = y as usize * out.stride as usize + x as usize * 4;
+        match buffer.pixel_format {
+            PixelFormat::Bgra8Unorm => {
+                out.data[dst] = pixel[2];
+                out.data[dst + 1] = pixel[1];
+                out.data[dst + 2] = pixel[0];
+                out.data[dst + 3] = 255;
+            }
+            PixelFormat::Rgba8Unorm => {
+                out.data[dst] = pixel[0];
+                out.data[dst + 1] = pixel[1];
+                out.data[dst + 2] = pixel[2];
+                out.data[dst + 3] = 255;
+            }
+        }
+    }
+    Ok((out, actual_scale))
+}
+
 fn crop_cpu_buffer(buffer: &CpuBuffer, roi: RoiSpec) -> Result<CpuBuffer, VisionError> {
     let rect = roi.rect;
     if rect.x < 0
@@ -206,42 +228,4 @@ fn crop_cpu_buffer(buffer: &CpuBuffer, roi: RoiSpec) -> Result<CpuBuffer, Vision
     }
 
     Ok(out)
-}
-
-fn rgb_to_hsv(r: u8, g: u8, b: u8) -> [u8; 3] {
-    let rf = r as f32 / 255.0;
-    let gf = g as f32 / 255.0;
-    let bf = b as f32 / 255.0;
-
-    let max = rf.max(gf).max(bf);
-    let min = rf.min(gf).min(bf);
-    let delta = max - min;
-
-    let h = if delta == 0.0 {
-        0.0
-    } else if max == rf {
-        60.0 * (((gf - bf) / delta) % 6.0)
-    } else if max == gf {
-        60.0 * (((bf - rf) / delta) + 2.0)
-    } else {
-        60.0 * (((rf - gf) / delta) + 4.0)
-    };
-    let h = if h < 0.0 { h + 360.0 } else { h };
-    let s = if max == 0.0 { 0.0 } else { delta / max };
-    let v = max;
-
-    [
-        ((h / 2.0).round() as i32).clamp(0, 179) as u8,
-        (s * 255.0).round() as u8,
-        (v * 255.0).round() as u8,
-    ]
-}
-
-fn within_range(hsv: [u8; 3], lower: &[u8; 3], upper: &[u8; 3]) -> bool {
-    hsv[0] >= lower[0]
-        && hsv[0] <= upper[0]
-        && hsv[1] >= lower[1]
-        && hsv[1] <= upper[1]
-        && hsv[2] >= lower[2]
-        && hsv[2] <= upper[2]
 }

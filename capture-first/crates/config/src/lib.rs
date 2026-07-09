@@ -92,10 +92,10 @@ pub struct PerformanceConfig {
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
-            target_fps: 60,
+            target_fps: 120,
             enable_multithreading: true,
             max_processing_threads: 4,
-            frame_buffer_size: 5,
+            frame_buffer_size: 2,
             enable_gpu_acceleration: true,
         }
     }
@@ -137,11 +137,12 @@ pub struct HsvTrackingConfig {
 impl Default for HsvTrackingConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            // Off by default — full-ROI CPU scan on the UI thread freezes the window.
+            enabled: false,
             lower_bound: [140, 120, 180],
             upper_bound: [160, 200, 255],
             morphology_kernel_size: 3,
-            min_contour_area: 100,
+            min_contour_area: 20,
         }
     }
 }
@@ -158,6 +159,86 @@ impl From<&HsvTrackingConfig> for HsvSettings {
             min_contour_area: value.min_contour_area,
         }
     }
+}
+
+/// HsvColorPicker-compatible settings file (`hsv_settings.json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HsvPickerSettings {
+    pub hue_min: u8,
+    pub hue_max: u8,
+    pub sat_min: u8,
+    pub sat_max: u8,
+    pub val_min: u8,
+    pub val_max: u8,
+}
+
+impl Default for HsvPickerSettings {
+    fn default() -> Self {
+        Self {
+            hue_min: 0,
+            hue_max: 179,
+            sat_min: 0,
+            sat_max: 255,
+            val_min: 0,
+            val_max: 255,
+        }
+    }
+}
+
+impl HsvPickerSettings {
+    pub fn clamp_min_max(&mut self) {
+        if self.hue_min > self.hue_max {
+            self.hue_min = self.hue_max;
+        }
+        if self.sat_min > self.sat_max {
+            self.sat_min = self.sat_max;
+        }
+        if self.val_min > self.val_max {
+            self.val_min = self.val_max;
+        }
+    }
+
+    pub fn apply_to(&self, target: &mut HsvTrackingConfig) {
+        target.lower_bound = [self.hue_min, self.sat_min, self.val_min];
+        target.upper_bound = [self.hue_max, self.sat_max, self.val_max];
+    }
+
+    #[must_use]
+    pub fn from_tracking(config: &HsvTrackingConfig) -> Self {
+        Self {
+            hue_min: config.lower_bound[0],
+            hue_max: config.upper_bound[0],
+            sat_min: config.lower_bound[1],
+            sat_max: config.upper_bound[1],
+            val_min: config.lower_bound[2],
+            val_max: config.upper_bound[2],
+        }
+    }
+}
+
+#[must_use]
+pub fn hsv_settings_path_for_config(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .map_or_else(|| PathBuf::from("config"), Path::to_path_buf)
+        .join("hsv_settings.json")
+}
+
+pub fn load_hsv_picker_settings(path: &Path) -> Result<HsvPickerSettings, ConfigError> {
+    if !path.exists() {
+        return Ok(HsvPickerSettings::default());
+    }
+    let content = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content).unwrap_or_default())
+}
+
+pub fn save_hsv_picker_settings(path: &Path, settings: &HsvPickerSettings) -> Result<(), ConfigError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(settings)?;
+    fs::write(path, json)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,7 +260,9 @@ pub struct Yolo26Config {
 impl Default for Yolo26Config {
     fn default() -> Self {
         Self {
-            enabled: true,
+            // Off until Load Model — running uninitialized YOLO path is cheap, but
+            // once loaded, inference on the UI thread must be throttled (see PROCESS_MIN_INTERVAL).
+            enabled: false,
             onnx_model_path: PathBuf::from("models/yolo26n.onnx"),
             class_names_path: PathBuf::from("models/coco_classes.txt"),
             confidence_threshold: 0.25,
