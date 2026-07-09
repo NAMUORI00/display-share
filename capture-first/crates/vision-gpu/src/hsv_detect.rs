@@ -1,7 +1,10 @@
 //! HSV color detection — ported from [HsvColorPicker](https://github.com/NAMUORI00/HsvColorPicker)
 //! (mask → dilate → contour → bounding boxes, OpenCV-style hue wrap).
 
-use capture_core::{CpuBuffer, HsvDetectedObject, HsvMaskStats, HsvSettings, PixelFormat, RectI, Size2D};
+use capture_core::{
+    CpuBuffer, HsvDetectedObject, HsvMaskStats, HsvSettings, HsvTuneResult, PixelFormat, RectI,
+    Size2D,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 struct HsvPixel {
@@ -32,13 +35,23 @@ const DIRECTIONS: [(i32, i32); 8] = [
 ];
 
 /// Run HsvColorPicker-style detection on a CPU buffer; scale boxes to `frame_size`.
+#[allow(dead_code)]
 pub fn detect_hsv_on_buffer(
     buffer: &CpuBuffer,
     settings: &HsvSettings,
     frame_size: Size2D,
 ) -> HsvMaskStats {
+    detect_hsv_with_preview(buffer, settings, frame_size).stats
+}
+
+/// Detection plus raw/morph masks for live HSV tuning UI.
+pub fn detect_hsv_with_preview(
+    buffer: &CpuBuffer,
+    settings: &HsvSettings,
+    frame_size: Size2D,
+) -> HsvTuneResult {
     if !settings.enabled || buffer.width == 0 || buffer.height == 0 {
-        return HsvMaskStats::default();
+        return HsvTuneResult::default();
     }
 
     let range = HsvRange {
@@ -90,10 +103,16 @@ pub fn detect_hsv_on_buffer(
         });
     }
 
-    HsvMaskStats {
-        hit_count,
-        bbox_union,
-        objects,
+    HsvTuneResult {
+        stats: HsvMaskStats {
+            hit_count,
+            bbox_union,
+            objects,
+        },
+        preview_width: buffer.width,
+        preview_height: buffer.height,
+        raw_mask: mask,
+        morph_mask: dilated,
     }
 }
 

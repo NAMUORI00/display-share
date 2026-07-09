@@ -1,10 +1,10 @@
 //! Frame pipeline orchestrator — ROI crop, single-readback policy, HSV/YOLO routing.
-//! Keeps `smartscreencapture` as a thin eframe shell (no MainInterface god-class).
+//! Keeps the app shell thin (no MainInterface god-class).
 
 use capture_core::{
     AnalysisFrame, CaptureFrame, CaptureRoi, CpuBuffer, DetectionResult, HsvMaskStats, HsvSettings,
-    InferenceBackend, InferenceSettings, ModelInputSize, ProcessedFrame, ProviderState, Size2D,
-    TensorInputHandle, VisionPipeline,
+    HsvTuneResult, InferenceBackend, InferenceSettings, ModelInputSize, ProcessedFrame,
+    ProviderState, Size2D, TensorInputHandle, VisionPipeline,
 };
 use config::RuntimeBindings;
 use thiserror::Error;
@@ -30,6 +30,7 @@ pub enum PipelineError {
 #[derive(Debug, Clone)]
 pub struct PipelineReport {
     pub hsv: HsvMaskStats,
+    pub hsv_tune: Option<HsvTuneResult>,
     pub yolo_detections: Vec<DetectionResult>,
     /// Full-frame preview (downscaled), not ROI-only.
     pub preview_buffer: Option<CpuBuffer>,
@@ -115,6 +116,7 @@ impl FramePipeline {
         if frame_size.width == 0 || frame_size.height == 0 {
             return Ok(PipelineReport {
                 hsv: HsvMaskStats::default(),
+                hsv_tune: None,
                 yolo_detections: Vec::new(),
                 preview_buffer: None,
                 capture_size: frame_size,
@@ -164,12 +166,19 @@ impl FramePipeline {
         let logical_zero_copy =
             processed.logical_zero_copy && roi_cpu.is_none() && preview_buffer.is_none();
 
-        let hsv = if let Some(buffer) = roi_cpu.as_ref() {
-            self.vision
-                .detect_hsv_stats(buffer, &settings.hsv, frame_size)?
+        let hsv_tune = if let Some(buffer) = roi_cpu.as_ref() {
+            if settings.hsv.enabled {
+                Some(self.vision.detect_hsv_tune(buffer, &settings.hsv, frame_size)?)
+            } else {
+                None
+            }
         } else {
-            HsvMaskStats::default()
+            None
         };
+        let hsv = hsv_tune
+            .as_ref()
+            .map(|t| t.stats.clone())
+            .unwrap_or_default();
 
         let yolo_detections = if inference_ready {
             if let Some(backend) = inference {
@@ -198,6 +207,7 @@ impl FramePipeline {
 
         Ok(PipelineReport {
             hsv,
+            hsv_tune,
             yolo_detections,
             preview_buffer,
             capture_size: frame_size,
@@ -220,6 +230,7 @@ impl FramePipeline {
         if frame_size.width == 0 || frame_size.height == 0 {
             return Ok(PipelineReport {
                 hsv: HsvMaskStats::default(),
+                hsv_tune: None,
                 yolo_detections: Vec::new(),
                 preview_buffer: None,
                 capture_size: frame_size,
@@ -239,15 +250,19 @@ impl FramePipeline {
             });
 
         let needs_roi_cpu = settings.hsv.enabled || inference_ready;
-        let hsv = if needs_roi_cpu && settings.hsv.enabled {
-            self.vision.detect_hsv_stats(
+        let hsv_tune = if needs_roi_cpu && settings.hsv.enabled {
+            Some(self.vision.detect_hsv_tune(
                 &analysis.roi_buffer,
                 &settings.hsv,
                 analysis.capture_size,
-            )?
+            )?)
         } else {
-            HsvMaskStats::default()
+            None
         };
+        let hsv = hsv_tune
+            .as_ref()
+            .map(|t| t.stats.clone())
+            .unwrap_or_default();
 
         let yolo_detections = if inference_ready {
             if let Some(backend) = inference {
@@ -274,6 +289,7 @@ impl FramePipeline {
 
         Ok(PipelineReport {
             hsv,
+            hsv_tune,
             yolo_detections,
             preview_buffer: None,
             capture_size: frame_size,

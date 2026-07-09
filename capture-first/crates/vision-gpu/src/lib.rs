@@ -3,9 +3,11 @@
 
 mod hsv_detect;
 
+pub use hsv_detect::detect_hsv_with_preview;
+
 use capture_core::{
-    CaptureFrame, CaptureRoi, CpuBuffer, CpuNchwTensor, HsvMaskStats, HsvSettings, PixelFormat,
-    ProcessedFrame, RoiSpec, Size2D, TensorInputHandle, VisionError, VisionPipeline,
+    CaptureFrame, CaptureRoi, CpuBuffer, CpuNchwTensor, HsvMaskStats, HsvSettings, HsvTuneResult,
+    PixelFormat, ProcessedFrame, RoiSpec, Size2D, TensorInputHandle, VisionError, VisionPipeline,
 };
 use image::{RgbImage, imageops::FilterType};
 
@@ -75,11 +77,21 @@ impl GpuVisionPipeline {
         settings: &HsvSettings,
         frame_size: Size2D,
     ) -> Result<HsvMaskStats, VisionError> {
+        Ok(self.detect_hsv_tune(buffer, settings, frame_size)?.stats)
+    }
+
+    /// HSV detection with raw/morph masks for tuning UI.
+    pub fn detect_hsv_tune(
+        &self,
+        buffer: &CpuBuffer,
+        settings: &HsvSettings,
+        frame_size: Size2D,
+    ) -> Result<HsvTuneResult, VisionError> {
         if !settings.enabled {
-            return Ok(HsvMaskStats::default());
+            return Ok(HsvTuneResult::default());
         }
         ensure_canonical_format(buffer.pixel_format)?;
-        Ok(hsv_detect::detect_hsv_on_buffer(buffer, settings, frame_size))
+        Ok(hsv_detect::detect_hsv_with_preview(buffer, settings, frame_size))
     }
 
     pub fn crop_capture_roi(
