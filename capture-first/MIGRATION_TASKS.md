@@ -1,6 +1,6 @@
 # Migration Tasks
 
-This backlog tracks the remaining work required before the Rust workspace can replace the current C++ `ScreenMonitor/` implementation.
+Backlog for the Rust `capture-first` SmartScreenCapture workspace.
 
 ## Track 0: Design Refactor (layer boundaries)
 
@@ -45,15 +45,19 @@ Completion criteria:
 
 - [x] DirectML-first session initialization
 - [x] CPU fallback session initialization
+- [x] OpenVINO EP in provider chain (Intel GPU/NPU; soft-fail if runtime missing)
+- [x] Wire config `execution_providers` into session init (`directml` → `openvino` → `cpu`)
 - [x] Basic YOLO output parsing for common row-major and channel-major outputs
 - [ ] Validate parsing against the actual shipped YOLO model outputs
 - [x] Support model metadata inspection and shape diagnostics in UI/logs
 - [x] Add regression tests for output parsing and validation notes
-- [ ] Add regression tests for provider fallback
+- [x] Add regression tests for provider list normalization / OpenVINO device_type resolution
+- [ ] Add regression tests for live provider fallback against a real `.onnx` asset
 
 Completion criteria:
 - The shipped ONNX model produces stable detections on Windows 11
 - Provider state and fallback cause are visible in UI/logs
+- Intel Gram (OpenVINO) and DirectML GPUs share the same YOLO path
 
 Current blocker:
 - The repository does not currently contain the shipped `.onnx` model, so real-model output validation remains pending until that asset is available on disk.
@@ -69,7 +73,7 @@ Current blocker:
 - [ ] Texture-native preview path that avoids CPU image upload when a renderer bridge is available
 
 Completion criteria:
-- The Rust app is operational without falling back to the C++ UI
+- The Rust app is operational for operators without a separate UI stack
 - Operators can understand backend choice, provider choice, and failure reasons from the UI alone
 
 ## Track 5: Verification

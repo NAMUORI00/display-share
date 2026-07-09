@@ -7,7 +7,7 @@
 - 지원 모델: `YOLO26 detect`
 - 권장 입력: `640x640`
 - 권장 배치: `batch=1`
-- 실행 백엔드: `ONNX Runtime CUDA -> CPU fallback`
+- 실행 백엔드: `DirectML → OpenVINO → CPU` (`ort` execution providers)
 
 다음 항목은 이 가이드 범위에 포함하지 않습니다.
 
@@ -40,11 +40,11 @@ yolo export model=yolo26n.pt format=onnx imgsz=640 batch=1 dynamic=False
 생성된 ONNX 파일을 이 폴더에 두고 설정에서 경로를 맞춥니다.
 
 ```text
-ScreenMonitor/models/yolo26n.onnx
-ScreenMonitor/models/coco_classes.txt
+models/yolo26n.onnx
+models/coco_classes.txt
 ```
 
-기본 설정값:
+기본 설정값 (`config/config.json`):
 
 - 모델 경로: `models/yolo26n.onnx`
 - 클래스 파일: `models/coco_classes.txt`
@@ -57,28 +57,24 @@ ScreenMonitor/models/coco_classes.txt
 
 ## GPU 사용 방식
 
-이 프로젝트의 문서상 GPU 사용 정책은 단순합니다.
-
-- 앱 하나는 GPU 하나만 선택
-- 가능한 경우 CUDA provider로 실행
-- 선택한 GPU에서 세션 생성에 실패하면 CPU fallback
+- 앱 하나는 GPU/NPU 디바이스 하나만 선택 (`selected_gpu_id` / OpenVINO `device_type`)
+- 기본 EP 순서: DirectML → OpenVINO → CPU
+- 선택한 provider에서 세션 생성에 실패하면 다음 provider로 soft-fail
 - 앱 내부에서 여러 GPU에 추론을 분산하지 않음
 
-다중 GPU 시스템에서는 각 앱 인스턴스가 서로 다른 GPU를 선택하는 사용 형태를 가정합니다.
+Intel Gram 등에서 OpenVINO NPU/GPU를 쓰려면 OpenVINO Runtime이 설치되어 있어야 합니다.
 
 ## 문제 해결
 
 ### 모델 초기화 실패
 
 - `yolo26n.onnx` 경로가 맞는지 확인
-- CMake configure가 ONNX Runtime GPU 번들을 정상적으로 내려받았는지 확인
-- CUDA provider DLL이 실행 파일 옆에 배치됐는지 확인
+- `ort` / DirectML / OpenVINO 런타임이 사용 가능한지 확인
 - 모델이 `detect ONNX / batch=1 / 640x640` 계약과 크게 다르지 않은지 확인
 
 ### GPU가 선택되지 않음
 
-- NVIDIA GPU와 드라이버가 정상인지 확인
-- ONNX Runtime GPU 패키지와 CUDA 런타임 버전 조합이 맞는지 확인
+- DirectML 장치 ID 또는 OpenVINO `device_type` 설정을 확인
 - 실패 시 CPU fallback으로 동작할 수 있으므로 provider 상태를 GUI에서 확인
 
 ## 라이선스 메모

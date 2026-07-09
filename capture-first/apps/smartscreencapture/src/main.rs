@@ -46,13 +46,7 @@ struct DesktopApp {
 impl DesktopApp {
     fn bootstrap() -> Result<Self> {
         let repo_root = discover_repo_root(std::env::current_dir()?);
-        let config_paths = vec![
-            repo_root.join("config").join("config.json"),
-            repo_root
-                .join("ScreenMonitor")
-                .join("config")
-                .join("config.json"),
-        ];
+        let config_paths = vec![repo_root.join("config").join("config.json")];
         let config_path = config_paths
             .iter()
             .find(|path| path.exists())
@@ -141,12 +135,24 @@ impl DesktopApp {
             }
             UiCommand::LoadModel => {
                 let settings = (&self.ui.model.config.vision_algorithms.yolo26_detection).into();
+                let providers = self
+                    .ui
+                    .model
+                    .config
+                    .vision_algorithms
+                    .yolo26_detection
+                    .execution_providers
+                    .join(", ");
+                self.push_log(format!("loading model with EP order: [{providers}]"));
                 match self.inference.initialize(settings) {
                     Ok(state) => {
                         self.sync_inference_ui_state();
                         self.ui.model.provider_state = state;
                         self.ui.model.last_error = None;
-                        self.push_log("inference backend initialized");
+                        self.push_log(format!(
+                            "inference backend initialized: {}",
+                            self.inference.backend_name()
+                        ));
                         self.log_inference_diagnostics();
                     }
                     Err(err) => {
@@ -250,7 +256,7 @@ impl DesktopApp {
         let diagnostics = self.ui.model.inference_diagnostics.clone();
         self.push_log(inference_summary(&diagnostics));
         if let Some(reason) = diagnostics.fallback_reason {
-            self.push_log(format!("DirectML fallback reason: {reason}"));
+            self.push_log(format!("provider fallback reason: {reason}"));
         }
         for note in diagnostics.validation_notes {
             self.push_log(format!("model validation: {note}"));
@@ -277,7 +283,9 @@ impl eframe::App for DesktopApp {
 
 fn discover_repo_root(start: PathBuf) -> PathBuf {
     for current in start.ancestors() {
-        if current.join("ScreenMonitor").exists() || current.join("config").exists() {
+        if current.join("capture-first").exists()
+            || (current.join("config").exists() && current.join("models").exists())
+        {
             return current.to_path_buf();
         }
     }
