@@ -6,5 +6,6 @@ license.workspace = true
 
 [dependencies]
 capture-core = { path = "../capture-core" }
+parking_lot.workspace = true
 thiserror.workspace = true
 windows = { workspace = true, features = ["Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common"] }
