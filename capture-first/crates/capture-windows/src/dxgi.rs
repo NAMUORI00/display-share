@@ -35,7 +35,8 @@ const REINIT_BACKOFF_CAP: Duration = Duration::from_secs(2);
 const REINIT_FAILURE_LIMIT: u32 = 40;
 /// Monitor preview cadence — independent of capture target FPS.
 const PREVIEW_MIN_INTERVAL: Duration = Duration::from_millis(50);
-const PREVIEW_MAX_LONG_EDGE: u32 = 960;
+/// Near-native View quality (1080p long edge). Analysis path stays at 640 separately.
+const PREVIEW_MAX_LONG_EDGE: u32 = 1920;
 /// YOLO/HSV analysis cadence (~15 FPS). Uses full-frame downscale, not center crop.
 const ANALYSIS_MIN_INTERVAL: Duration = Duration::from_millis(66);
 const ANALYSIS_MAX_LONG_EDGE: u32 = 640;
