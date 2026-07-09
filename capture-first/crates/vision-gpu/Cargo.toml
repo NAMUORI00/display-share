@@ -1,0 +1,9 @@
+[package]
+name = "vision-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+capture-core = { path = "../capture-core" }
+image.workspace = true

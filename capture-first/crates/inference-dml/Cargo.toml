@@ -1,0 +1,10 @@
+[package]
+name = "inference-dml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+capture-core = { path = "../capture-core" }
+ort.workspace = true
+tracing.workspace = true

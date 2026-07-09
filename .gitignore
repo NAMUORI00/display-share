@@ -112,3 +112,4 @@ config/secrets.json
 
 # Bundled runtime downloads
 ScreenMonitor/external/onnxruntime/
+capture-first/target/
