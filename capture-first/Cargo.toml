@@ -24,6 +24,8 @@ crossbeam-channel = "0.5.15"
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "wgpu"] }
 egui = "0.33.3"
 egui_dock = "0.18.0"
+# eframe's wgpu dep disables defaults; enable Windows backends via feature unification.
+wgpu = { version = "27.0.1", default-features = false, features = ["std", "dx12", "vulkan", "wgsl"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 imageproc = "0.26.1"
 ndarray = "0.16.1"
