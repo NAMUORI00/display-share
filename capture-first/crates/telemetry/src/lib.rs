@@ -14,7 +14,6 @@ pub struct TelemetryHub {
 struct TelemetryState {
     snapshot: PerformanceSnapshot,
     started_at: Instant,
-    last_frame_at: Option<Instant>,
     last_capture_dropped: u64,
 }
 
@@ -24,7 +23,6 @@ impl Default for TelemetryHub {
             inner: Mutex::new(TelemetryState {
                 snapshot: PerformanceSnapshot::default(),
                 started_at: Instant::now(),
-                last_frame_at: None,
                 last_capture_dropped: 0,
             }),
         }
@@ -37,29 +35,15 @@ impl TelemetryHub {
         self.inner.lock().snapshot.clone()
     }
 
-    pub fn on_frame(&self) {
-        self.on_frame_with_processing(None);
-    }
+    pub fn on_frames(&self, count: u64) {
+        if count == 0 {
+            return;
+        }
 
-    pub fn on_frame_with_processing(&self, processing_time_ms: Option<f64>) {
         let mut state = self.inner.lock();
         let now = Instant::now();
-        state.snapshot.total_frames += 1;
-        if let Some(ms) = processing_time_ms {
-            state.snapshot.processing_time_ms = ms;
-        } else {
-            state.snapshot.processing_time_ms = state
-                .last_frame_at
-                .map(|last| now.duration_since(last).as_secs_f64() * 1000.0)
-                .unwrap_or(0.0);
-        }
-        state.last_frame_at = Some(now);
-
-        let elapsed = now.duration_since(state.started_at).as_secs_f32();
-        if elapsed > 0.0 {
-            state.snapshot.fps = state.snapshot.total_frames as f32 / elapsed;
-            state.snapshot.frame_time_ms = 1000.0 / state.snapshot.fps.max(0.001) as f64;
-        }
+        state.snapshot.total_frames += count;
+        update_rates(&mut state, now);
     }
 
     /// Update processing latency without counting another capture frame.
@@ -79,5 +63,29 @@ impl TelemetryHub {
             state.snapshot.dropped_frames += stats.dropped_frames - state.last_capture_dropped;
         }
         state.last_capture_dropped = stats.dropped_frames;
+    }
+}
+
+fn update_rates(state: &mut TelemetryState, now: Instant) {
+    let elapsed = now.duration_since(state.started_at).as_secs_f32();
+    if elapsed > 0.0 {
+        state.snapshot.fps = state.snapshot.total_frames as f32 / elapsed;
+        state.snapshot.frame_time_ms = 1000.0 / state.snapshot.fps.max(0.001) as f64;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TelemetryHub;
+
+    #[test]
+    fn records_frame_batches_with_one_update() {
+        let telemetry = TelemetryHub::default();
+
+        telemetry.on_frames(5);
+
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.total_frames, 5);
+        assert_eq!(snapshot.dropped_frames, 0);
     }
 }

@@ -6,6 +6,7 @@ mod device;
 mod dxgi;
 mod enumerate;
 mod resolve;
+mod window_privacy;
 
 use capture_core::{CaptureBackend, CaptureError, CaptureOptions, CaptureSession, CaptureTarget};
 
@@ -14,6 +15,7 @@ use crate::enumerate::enumerate_display_monitors;
 use crate::resolve::resolve_backend;
 
 pub use crate::device::SharedD3d11Device;
+pub use crate::window_privacy::{WindowExclusionReport, exclude_own_windows_from_capture};
 
 #[derive(Default)]
 pub struct WindowsCaptureBackend {
@@ -42,7 +44,7 @@ impl CaptureBackend for WindowsCaptureBackend {
         // Normalize to the supported DXGI display-capture path.
         let options = options.normalize_for_display_capture();
         // DXGI-only path. WGC is not wired into this crate.
-        let _ = resolve_backend(target, options.backend_preference)?;
+        let _ = resolve_backend(target)?;
         self.dxgi.start(target, options)
     }
 
@@ -53,9 +55,7 @@ impl CaptureBackend for WindowsCaptureBackend {
 
 #[cfg(test)]
 mod tests {
-    use capture_core::{
-        CaptureBackendKind, CaptureBackendPreference, CaptureTarget, CaptureTargetKind, Size2D,
-    };
+    use capture_core::{CaptureBackendKind, CaptureTarget, CaptureTargetKind, Size2D};
 
     use crate::resolve::resolve_backend;
 
@@ -78,21 +78,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_resolves_to_dxgi_only() {
+    fn resolves_to_dxgi_only() {
         let target = make_target(vec![CaptureBackendKind::DxgiDuplication]);
 
-        let backend = resolve_backend(&target, CaptureBackendPreference::Auto)
-            .expect("backend should resolve");
-
-        assert_eq!(backend, CaptureBackendKind::DxgiDuplication);
-    }
-
-    #[test]
-    fn prefer_wgc_still_resolves_to_dxgi() {
-        let target = make_target(vec![CaptureBackendKind::DxgiDuplication]);
-
-        let backend = resolve_backend(&target, CaptureBackendPreference::WindowsGraphicsCapture)
-            .expect("DXGI-only path resolves WGC preference to DXGI");
+        let backend = resolve_backend(&target).expect("backend should resolve");
 
         assert_eq!(backend, CaptureBackendKind::DxgiDuplication);
     }
@@ -101,8 +90,7 @@ mod tests {
     fn missing_dxgi_fails_clearly() {
         let target = make_target(vec![CaptureBackendKind::WindowsGraphicsCapture]);
 
-        let error = resolve_backend(&target, CaptureBackendPreference::Auto)
-            .expect_err("DXGI must be available");
+        let error = resolve_backend(&target).expect_err("DXGI must be available");
 
         assert!(error.to_string().contains("Display session"));
     }
@@ -150,7 +138,6 @@ mod tests {
                 no_hook: false,
                 obs_adapter_allowed: true,
             },
-            backend_preference: CaptureBackendPreference::WindowsGraphicsCapture,
         };
 
         let session = backend
@@ -184,7 +171,7 @@ mod tests {
         assert!(frames >= 1, "expected frame_number >= 1, got {frames}");
         let size = last_size.expect("frame size");
         eprintln!(
-            "smoke: ok backend=DxgiDuplication target={} frames>={} size={}x{} (normalization forced DXGI despite WGC preference)",
+            "smoke: ok backend=DxgiDuplication target={} frames>={} size={}x{}",
             target.name, frames, size.width, size.height
         );
     }

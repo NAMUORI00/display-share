@@ -12,6 +12,9 @@ Backlog for the Rust `capture-first` SmartScreenCapture workspace.
 - [x] Honest `prepare_for_inference` (CPU NCHW preprocess) + `HsvMaskStats`
 - [x] App uses `InferenceBackend::infer` only; preprocess owned by vision/pipeline
 - [x] TelemetryHub single aggregator; texture create failures return `Result` (no `expect`)
+- [x] Keep Win32 window-exclusion code inside `capture-windows`
+- [x] Split the app entry point, vision worker, image presentation, and UI model
+- [x] Remove the unused backend preference layer while the runtime is DXGI-only
 
 ## Track 1: Capture Backends
 
@@ -91,8 +94,8 @@ Completion criteria:
 
 ## Recommended Execution Order
 
-1. Implement `DXGI duplication` backend and runtime backend selection.
+1. Run DXGI smoke tests and performance benchmarks on real Windows hardware.
 2. Move ROI resize and preprocessing fully onto D3D11.
 3. Remove inference-path CPU readback and keep preview/debug readback optional.
 4. Harden YOLO parsing against the actual model outputs.
-5. Add smoke tests and performance benchmarks on real Windows hardware.
+5. Implement WGC, then add runtime backend selection between supported backends.
