@@ -235,6 +235,13 @@ impl DesktopApp {
             .model
             .config
             .runtime_bindings(self.ui.model.preview_enabled);
+        let window_exclusion = self
+            .ui
+            .model
+            .config
+            .privacy
+            .exclude_own_windows_active()
+            .then(exclude_own_windows_from_capture);
         match self.capture_backend.start(&target, bindings.capture) {
             Ok(session) => {
                 let backend = session.backend_kind();
@@ -245,8 +252,7 @@ impl DesktopApp {
                 self.session_fingerprint = self.current_fingerprint();
                 self.last_preview_enabled = false;
                 self.last_analysis_enabled = false;
-                if self.ui.model.config.privacy.exclude_own_windows_active() {
-                    let result = exclude_own_windows_from_capture();
+                if let Some(result) = window_exclusion {
                     self.push_log(format!(
                         "privacy: excluded {} own window(s) from local capture preview; {} failure(s)",
                         result.applied, result.failed
