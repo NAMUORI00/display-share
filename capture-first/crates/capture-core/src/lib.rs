@@ -18,16 +18,6 @@ pub enum CaptureBackendKind {
     ObsAdapter,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum CaptureBackendPreference {
-    #[default]
-    Auto,
-    WindowsGraphicsCapture,
-    DxgiDuplication,
-    ObsAdapter,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CaptureTargetKind {
@@ -204,7 +194,6 @@ pub struct CaptureOptions {
     pub target_fps: u32,
     pub buffer_depth: usize,
     pub compatibility: CompatibilityPolicy,
-    pub backend_preference: CaptureBackendPreference,
 }
 
 impl Default for CaptureOptions {
@@ -215,25 +204,18 @@ impl Default for CaptureOptions {
             target_fps: 60,
             buffer_depth: 3,
             compatibility: CompatibilityPolicy::default(),
-            backend_preference: CaptureBackendPreference::Auto,
         }
     }
 }
 
 impl CaptureOptions {
     /// Normalize options to the currently implemented display-capture backend.
-    /// Hooks are never allowed; WGC preference falls back to DXGI because WGC is not active here.
+    /// Hooks are never allowed.
     #[must_use]
     pub fn normalize_for_display_capture(mut self) -> Self {
         self.include_cursor = false;
         self.draw_border = false;
         self.compatibility.no_hook = true;
-        if matches!(
-            self.backend_preference,
-            CaptureBackendPreference::WindowsGraphicsCapture
-        ) {
-            self.backend_preference = CaptureBackendPreference::DxgiDuplication;
-        }
         self
     }
 }
@@ -637,16 +619,6 @@ pub fn backend_kind_label(kind: CaptureBackendKind) -> &'static str {
     }
 }
 
-#[must_use]
-pub fn backend_preference_label(preference: CaptureBackendPreference) -> &'static str {
-    match preference {
-        CaptureBackendPreference::Auto => "Auto",
-        CaptureBackendPreference::WindowsGraphicsCapture => "Prefer WGC",
-        CaptureBackendPreference::DxgiDuplication => "Force DXGI",
-        CaptureBackendPreference::ObsAdapter => "OBS adapter",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,16 +634,11 @@ mod tests {
                 no_hook: false,
                 obs_adapter_allowed: true,
             },
-            backend_preference: CaptureBackendPreference::WindowsGraphicsCapture,
         }
         .normalize_for_display_capture();
 
         assert!(!options.include_cursor);
         assert!(!options.draw_border);
         assert!(options.compatibility.no_hook);
-        assert_eq!(
-            options.backend_preference,
-            CaptureBackendPreference::DxgiDuplication
-        );
     }
 }

@@ -1,11 +1,8 @@
-use std::path::PathBuf;
+mod model;
 
-use capture_core::{
-    CaptureBackendKind, CaptureBackendPreference, CaptureRoi, CaptureTarget, DetectionResult,
-    HsvMaskStats, InferenceDiagnostics, PerformanceSnapshot, ProviderState, RectI, Size2D,
-    backend_kind_label,
-};
-use config::AppConfig;
+pub use model::{HsvPreviewMaskMode, UiCommand, UiModel};
+
+use capture_core::{HsvMaskStats, ProviderState, RectI, backend_kind_label};
 use egui::{
     self, Align, Color32, ColorImage, CornerRadius, FontId, Frame, Margin, Pos2, Rect, RichText,
     Sense, Stroke, TextureHandle, TextureOptions, Vec2,
@@ -47,117 +44,6 @@ const PICKER_BORDER: Color32 = Color32::from_rgb(0x55, 0x55, 0x60);
 const PICKER_INK: Color32 = Color32::from_rgb(0xEC, 0xEC, 0xF0);
 const PICKER_MUTED: Color32 = Color32::from_rgb(0xA0, 0xA0, 0xAA);
 const PICKER_ACCENT: Color32 = Color32::from_rgb(0x4C, 0xA0, 0xFF);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum HsvPreviewMaskMode {
-    #[default]
-    RawMask,
-    MorphMask,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiCommand {
-    RefreshTargets,
-    StartCapture,
-    StopCapture,
-    LoadModel,
-    SaveSettings,
-    LoadHsvSettings,
-    SaveHsvSettings,
-}
-
-/// Display + draft edit state. App owns authoritative config; SaveSettings persists draft.
-#[derive(Debug, Clone)]
-pub struct UiModel {
-    pub targets: Vec<CaptureTarget>,
-    pub selected_target: usize,
-    pub capture_running: bool,
-    pub performance: PerformanceSnapshot,
-    pub provider_state: ProviderState,
-    pub backend_label: String,
-    pub backend_preference: CaptureBackendPreference,
-    pub active_backend: Option<CaptureBackendKind>,
-    pub last_error: Option<String>,
-    pub logs: Vec<String>,
-    /// Draft settings edited in Control rail (app persists on SaveSettings).
-    pub config: AppConfig,
-    /// Full-frame capture preview (downscaled).
-    pub preview_frame: Option<ColorImage>,
-    pub preview_frame_version: u64,
-    pub preview_enabled: bool,
-    pub preview_scale: f32,
-    pub capture_frame_size: Option<Size2D>,
-    pub capture_roi: Option<CaptureRoi>,
-    pub model_input_size: Option<Size2D>,
-    pub hsv: HsvMaskStats,
-    pub yolo_detections: Vec<DetectionResult>,
-    pub inference_diagnostics: InferenceDiagnostics,
-    pub config_path: Option<PathBuf>,
-    /// HSV tuning preview images (analysis-buffer resolution).
-    pub hsv_tune_source: Option<ColorImage>,
-    pub hsv_tune_raw: Option<ColorImage>,
-    pub hsv_tune_morph: Option<ColorImage>,
-    pub hsv_tune_overlay: Option<ColorImage>,
-    pub hsv_tune_version: u64,
-    pub hsv_coverage_pct: f32,
-    pub hsv_mask_overlay_enabled: bool,
-    pub hsv_tune_dirty: bool,
-    pub hsv_preview_mask_mode: HsvPreviewMaskMode,
-}
-
-impl Default for UiModel {
-    fn default() -> Self {
-        Self {
-            targets: Vec::new(),
-            selected_target: 0,
-            capture_running: false,
-            performance: PerformanceSnapshot::default(),
-            provider_state: ProviderState::Uninitialized,
-            backend_label: "Display".to_owned(),
-            backend_preference: CaptureBackendPreference::DxgiDuplication,
-            active_backend: None,
-            last_error: None,
-            logs: Vec::new(),
-            config: AppConfig::default(),
-            preview_frame: None,
-            preview_frame_version: 0,
-            preview_enabled: true,
-            preview_scale: 1.0,
-            capture_frame_size: None,
-            capture_roi: None,
-            model_input_size: None,
-            hsv: HsvMaskStats::default(),
-            yolo_detections: Vec::new(),
-            inference_diagnostics: InferenceDiagnostics::default(),
-            config_path: None,
-            hsv_tune_source: None,
-            hsv_tune_raw: None,
-            hsv_tune_morph: None,
-            hsv_tune_overlay: None,
-            hsv_tune_version: 0,
-            hsv_coverage_pct: 0.0,
-            hsv_mask_overlay_enabled: false,
-            hsv_tune_dirty: false,
-            hsv_preview_mask_mode: HsvPreviewMaskMode::RawMask,
-        }
-    }
-}
-
-impl UiModel {
-    #[must_use]
-    pub fn hsv_hit_count(&self) -> usize {
-        if !self.hsv.objects.is_empty() {
-            self.hsv.objects.len()
-        } else {
-            self.hsv.hit_count
-        }
-    }
-
-    #[must_use]
-    pub fn yolo_detection_count(&self) -> usize {
-        self.yolo_detections.len()
-    }
-}
 
 pub struct SmartCaptureUi {
     pub model: UiModel,
@@ -258,8 +144,6 @@ impl SmartCaptureUi {
             }
         }
 
-        // DXGI path is fixed — keep preference pinned.
-        self.model.backend_preference = CaptureBackendPreference::DxgiDuplication;
         self.sync_hsv_enable_edge();
 
         if self.monitor_open {

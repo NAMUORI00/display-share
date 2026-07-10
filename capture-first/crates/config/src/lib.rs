@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use capture_core::{
-    CaptureBackendPreference, CaptureOptions, CaptureRoi, CompatibilityPolicy, HsvRange,
-    HsvSettings, InferenceSettings, ModelInputSize, Size2D,
+    CaptureOptions, CaptureRoi, CompatibilityPolicy, HsvRange, HsvSettings, InferenceSettings,
+    ModelInputSize, Size2D,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -384,15 +384,6 @@ pub struct RuntimeBindings {
 impl RuntimeBindings {
     #[must_use]
     pub fn from_config(config: &AppConfig, preview_enabled: bool) -> Self {
-        Self::from_config_with_preference(config, preview_enabled, CaptureBackendPreference::Auto)
-    }
-
-    #[must_use]
-    pub fn from_config_with_preference(
-        config: &AppConfig,
-        preview_enabled: bool,
-        backend_preference: CaptureBackendPreference,
-    ) -> Self {
         let inference: InferenceSettings = (&config.vision_algorithms.yolo26_detection).into();
         let model_input =
             ModelInputSize::new(inference.input_size.width, inference.input_size.height);
@@ -407,7 +398,6 @@ impl RuntimeBindings {
                 target_fps: config.performance.target_fps,
                 buffer_depth: config.performance.frame_buffer_size.max(1),
                 compatibility,
-                backend_preference,
             }
             .normalize_for_display_capture(),
             hsv: (&config.vision_algorithms.hsv_tracking).into(),
@@ -461,12 +451,8 @@ impl AppConfig {
     }
 
     #[must_use]
-    pub fn runtime_bindings(
-        &self,
-        preview_enabled: bool,
-        backend_preference: CaptureBackendPreference,
-    ) -> RuntimeBindings {
-        RuntimeBindings::from_config_with_preference(self, preview_enabled, backend_preference)
+    pub fn runtime_bindings(&self, preview_enabled: bool) -> RuntimeBindings {
+        RuntimeBindings::from_config(self, preview_enabled)
     }
 }
 
@@ -540,7 +526,7 @@ mod tests {
     fn runtime_bindings_map_frame_buffer_size() {
         let mut config = AppConfig::default();
         config.performance.frame_buffer_size = 7;
-        let bindings = config.runtime_bindings(false, Default::default());
+        let bindings = config.runtime_bindings(false);
         assert_eq!(bindings.capture.buffer_depth, 7);
         assert_eq!(bindings.capture.target_fps, 120);
         assert!(!bindings.capture.include_cursor);

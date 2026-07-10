@@ -1,10 +1,7 @@
-use capture_core::{CaptureBackendKind, CaptureBackendPreference, CaptureError, CaptureTarget};
+use capture_core::{CaptureBackendKind, CaptureError, CaptureTarget};
 
 /// DXGI-only capture path. Preference does not select WGC; it only validates DXGI availability.
-pub fn resolve_backend(
-    target: &CaptureTarget,
-    _preference: CaptureBackendPreference,
-) -> Result<CaptureBackendKind, CaptureError> {
+pub fn resolve_backend(target: &CaptureTarget) -> Result<CaptureBackendKind, CaptureError> {
     if target
         .available_backends
         .contains(&CaptureBackendKind::DxgiDuplication)
