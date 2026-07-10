@@ -36,15 +36,30 @@ impl Default for ProductionSystem {
     }
 }
 
-/// Operator-controlled privacy settings. These defaults favor visible, auditable behavior.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_exclude_own_windows_from_capture() -> bool {
+    true
+}
+
+/// Operator-controlled privacy settings. Window exclusion is enabled without disguising identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivacyConfig {
-    /// Optional recursion guard for local previews. Disabled by default and logged when enabled.
-    #[serde(default)]
+    /// Recursion guard for local previews. Enabled by default and logged when applied.
+    #[serde(default = "default_exclude_own_windows_from_capture")]
     pub exclude_own_windows_from_capture: bool,
     pub display_name: Option<String>,
     pub window_title: Option<String>,
     pub monitor_title: Option<String>,
+}
+
+impl Default for PrivacyConfig {
+    fn default() -> Self {
+        Self {
+            exclude_own_windows_from_capture: true,
+            display_name: None,
+            window_title: None,
+            monitor_title: None,
+        }
+    }
 }
 
 impl PrivacyConfig {
@@ -509,6 +524,18 @@ mod tests {
         );
         assert!(config.analytics.enabled);
         assert_eq!(config.performance.target_fps, 120);
+        assert!(config.privacy.exclude_own_windows_from_capture);
+    }
+
+    #[test]
+    fn preserves_explicit_own_window_capture_opt_out() {
+        let raw = r#"{
+            "privacy": {
+                "exclude_own_windows_from_capture": false
+            }
+        }"#;
+
+        let config = AppConfig::load_from_str(raw).expect("config should load");
         assert!(!config.privacy.exclude_own_windows_from_capture);
     }
 
