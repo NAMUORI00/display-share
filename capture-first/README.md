@@ -22,6 +22,6 @@ Default order in `vision_algorithms.yolo26_detection.execution_providers`:
 
 - Use `"auto"` (or empty) to expand to the default order.
 - Optional `openvino_device_type`: `"GPU"`, `"NPU"`, `"GPU.0"`, etc. When omitted, OpenVINO tries `GPU` then `NPU`.
-- OpenVINO EP needs the [OpenVINO Runtime](https://docs.openvino.ai/latest/openvino_docs_install_guides_installing_openvino_from_archive_windows.html) installed and discoverable on the machine. If the EP is unavailable, initialization soft-fails to the next provider (no panic).
+- OpenVINO EP needs the [OpenVINO Runtime](https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-archive-windows.html) installed and discoverable on the machine. If the EP is unavailable, initialization soft-fails to the next provider (no panic).
 
 Remaining work is tracked in [MIGRATION_TASKS.md](./MIGRATION_TASKS.md).
