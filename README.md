@@ -11,7 +11,7 @@ Rust 워크스페이스 `capture-first` 위에서 디스플레이 캡처(DXGI De
 | 문서 사이트 | **[GitHub Pages](https://NAMUORI00.github.io/display-share/)** (`wiki` 브랜치) |
 | 문서 소스 | [`wiki` 브랜치](../../tree/wiki) |
 
-> 이전 저장소 이름: `C_capture` (이력·로컬 폴더명에 남을 수 있음)
+![display-share 비전 파이프라인](docs/assets/display-share-pipeline.svg)
 
 ## 빠른 시작
 
@@ -66,30 +66,11 @@ display-share/
 
 ## 문서
 
-긴 설명은 **소스와 분리된 `wiki` 브랜치**에 두고, GitHub Pages로 배포합니다.
+긴 설명은 소스와 분리된 `wiki` 브랜치에 두고 [GitHub Pages 문서 사이트](https://NAMUORI00.github.io/display-share/)로 배포합니다.
 
-| 문서 | 링크 |
-|------|------|
-| 홈 | https://NAMUORI00.github.io/display-share/ |
-| 아키텍처 | https://NAMUORI00.github.io/display-share/#arch |
-| 파이프라인 | https://NAMUORI00.github.io/display-share/#pipeline |
-| 설계안 | https://NAMUORI00.github.io/display-share/#design |
-| 개선점 | https://NAMUORI00.github.io/display-share/#improvements |
-| 시작하기 | https://NAMUORI00.github.io/display-share/#start |
-| 재현 가이드 | https://NAMUORI00.github.io/display-share/#repro |
-| 설정 | https://NAMUORI00.github.io/display-share/#config |
-| 모델 가이드 | https://NAMUORI00.github.io/display-share/#model |
-| 라이선스 | https://NAMUORI00.github.io/display-share/#license |
-| 개발 현황 | https://NAMUORI00.github.io/display-share/#status |
-
-로컬에서 wiki 소스만 보려면:
-
-```powershell
-git fetch origin wiki
-git switch wiki
-# 또는
-git show wiki:index.md
-```
+- [아키텍처](https://NAMUORI00.github.io/display-share/#arch)
+- [파이프라인](https://NAMUORI00.github.io/display-share/#pipeline)
+- [재현 가이드](https://NAMUORI00.github.io/display-share/#repro)
 
 ## 라이선스
 
@@ -101,4 +82,3 @@ git show wiki:index.md
 
 - [`models/README.md`](./models/README.md) — 모델 배치·다운로드
 - [`capture-first/README.md`](./capture-first/README.md) — 워크스페이스 영문 요약
-- [`capture-first/MIGRATION_TASKS.md`](./capture-first/MIGRATION_TASKS.md) — 구현 백로그
